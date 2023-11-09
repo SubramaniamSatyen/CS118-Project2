@@ -4,9 +4,20 @@
 #include <string.h>
 #include <unistd.h>
 #include <time.h>
+#include <sys/time.h>
+#include <string>
+#include <iostream>
+#include <map>
+#include <fstream>
+#include <iterator>
+#include <vector>
+#include <regex>
 
 #include "utils.h"
 
+using namespace std;
+
+void serve_local_file(string filename);
 
 int main(int argc, char *argv[]) {
     int listen_sockfd, send_sockfd;
@@ -62,21 +73,35 @@ int main(int argc, char *argv[]) {
     }
 
     // Open file for reading
-    FILE *fp = fopen(filename, "rb");
-    if (fp == NULL) {
-        perror("Error opening file");
-        close(listen_sockfd);
-        close(send_sockfd);
-        return 1;
-    }
+    // FILE *fp = fopen(filename, "rb");
+    // if (fp == NULL) {
+    //     perror("Error opening file");
+    //     close(listen_sockfd);
+    //     close(send_sockfd);
+    //     return 1;
+    // }
 
     // TODO: Read from file, and initiate reliable data transfer to the server
-
- 
+    serve_local_file(filename);
     
-    fclose(fp);
+    // fclose(fp);
     close(listen_sockfd);
     close(send_sockfd);
     return 0;
 }
 
+void serve_local_file(string filename) {
+    // Confirm file exists
+    string path = "./" + filename;
+    ifstream f(path.c_str());
+
+    if (f.good() == 1) {
+        ifstream input( path, ios::binary );
+
+        // Copies all data into buffer
+        vector<unsigned char> buffer(istreambuf_iterator<char>(input), {});
+    }
+    else {
+        printf("\nError reading file: %s", filename);
+    }
+}
