@@ -20,20 +20,10 @@ using namespace std;
 void serve_local_file(int listen_sock, int send_sock, FILE* filename);
 void send_packet(int listen_sock, int send_sock, char* packet);
 
-int PACKET_SIZE = 1024;
-
 int main(int argc, char *argv[]) {
     int listen_sockfd, send_sockfd;
     struct sockaddr_in client_addr, server_addr_to, server_addr_from;
     socklen_t addr_size = sizeof(server_addr_to);
-    struct timeval tv;
-    struct packet pkt;
-    struct packet ack_pkt;
-    char buffer[PAYLOAD_SIZE];
-    unsigned short seq_num = 0;
-    unsigned short ack_num = 0;
-    char last = 0;
-    char ack = 0;
 
     // read filename from command line argument
     if (argc != 2) {
@@ -94,11 +84,34 @@ int main(int argc, char *argv[]) {
 }
 
 void serve_local_file(int listen_sock, int send_sock, FILE* file) {
-    char buffer[PACKET_SIZE];
-    size_t bytes_read = fread(buffer, 1, PACKET_SIZE, file);
-    while (bytes_read > 0){
-        send_packet(listen_sock, send_sock, buffer);
-        bytes_read = fread(buffer, 1, PACKET_SIZE, file);
+    char buffer[PAYLOAD_SIZE];
+    char* payload_pointer = buffer + 1;
+    char* seq_pointer = buffer;
+
+    char seq_num = 1;
+    char curr_window_start = seq_num;
+
+    size_t bytes_read;
+    while (true){
+        if (seq_num < curr_window_start + WINDOW_SIZE){
+            // Likely will need lseek (or something of the sort, and use an iteration pointer - so we can retransmit missed data)
+            bytes_read = fread(payload_pointer, 1, PAYLOAD_SIZE - 1, file);
+            // Set sequence number and send packet
+            *seq_pointer = seq_num;
+            send_packet(listen_sock, send_sock, buffer);
+
+            seq_num += 1;
+        } 
+        else{
+            // Handle waiting and processing of ACK/Timeout
+
+            // Likely will need lseek (or something of the sort, and use an iteration pointer - so we can retransmit missed data)
+        }
+
+        // If final ACK, then we can wrap up
+        if (false) {
+            break;
+        }
     }
 }
 
