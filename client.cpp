@@ -3,7 +3,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <time.h>
 #include <sys/time.h>
 #include <string>
 #include <iostream>
@@ -12,8 +11,10 @@
 #include <iterator>
 #include <vector>
 #include <regex>
-
 #include "utils.h"
+#include <ctime>
+
+#define CHECK_BIT(var,pos) ((var) & (1<<(pos)))
 
 using namespace std;
 
@@ -84,32 +85,72 @@ int main(int argc, char *argv[]) {
 }
 
 void serve_local_file(int listen_sock, int send_sock, FILE* file) {
-    char buffer[PAYLOAD_SIZE];
-    char* payload_pointer = buffer + 1;
-    char* seq_pointer = buffer;
+    char send_buffer[PAYLOAD_SIZE];
+    char* payload_pointer = send_buffer + 1;
+    char* seq_pointer = send_buffer;
+    char rec_buffer[PAYLOAD_SIZE];
 
-    char seq_num = 1;
-    char curr_window_start = seq_num;
+    // Initializing variables
+    unsigned long sent_seq_num = 1;
+    unsigned long curr_window_start = sent_seq_num;
+    fseek(file, 0L, SEEK_END);
+    int total_bytes = ftell(file);
+    fseek(file, 0L, SEEK_SET);
+        
 
     size_t bytes_read;
+    time_t timeout_start;
     while (true){
-        if (seq_num < curr_window_start + WINDOW_SIZE){
-            // Likely will need lseek (or something of the sort, and use an iteration pointer - so we can retransmit missed data)
-            bytes_read = fread(payload_pointer, 1, PAYLOAD_SIZE - 1, file);
+        if (sent_seq_num < curr_window_start + WINDOW_SIZE){
+            bytes_read = fread(payload_pointer, 1, PAYLOAD_SIZE - 1, file);            
+            // If reached end of file, no transmission
+            if (bytes_read == 0){
+                continue;
+            }
+
             // Set sequence number and send packet
-            *seq_pointer = seq_num;
-            send_packet(listen_sock, send_sock, buffer);
-
-            seq_num += 1;
+            *seq_pointer = sent_seq_num % 256;
+            send_packet(listen_sock, send_sock, send_buffer);
+            sent_seq_num += 1;
+            timeout_start = time(nullptr);
         } 
-        else{
-            // Handle waiting and processing of ACK/Timeout
+        else {
+            bytes_read = recv(listen_sock, rec_buffer, PAYLOAD_SIZE, MSG_DONTWAIT);
+            int read_error = errno;
+            // Handle processing of ACK
+            if (bytes_read > 0 && read_error != EWOULDBLOCK){
+                // If the ACK message isn't requesting the start of the window, then we can move window forward
+                if (*rec_buffer != curr_window_start){
+                    curr_window_start = *rec_buffer;
+                }
+                else {
+                    // TODO: Any logic for handling triple ACKS, etc. (think we can rely on timeouts for initial implementation)
+                }
+            }
+            else if (read_error == EWOULDBLOCK && bytes_read <= 0) {
+                // TODO: Handle error with read
+            }
 
-            // Likely will need lseek (or something of the sort, and use an iteration pointer - so we can retransmit missed data)
+            // Handle timeouts
+            if (TIMEOUT + timeout_start < time(nullptr)) {
+                // Storing current position
+                long int current_position = ftell(file);
+
+                // Reading conent to send
+                fseek(file, curr_window_start, SEEK_SET);
+                bytes_read = fread(payload_pointer, 1, PAYLOAD_SIZE - 1, file);   
+                fseek(file, current_position, SEEK_SET);   
+
+                // Set sequence number and send packet
+                *seq_pointer = curr_window_start % 256;
+                send_packet(listen_sock, send_sock, send_buffer);
+                sent_seq_num += 1;
+                timeout_start = time(nullptr);
+            }
         }
 
-        // If final ACK, then we can wrap up
-        if (false) {
+        // If we've finished transmitting and do not have any further ACKS to receive, finish up
+        if (bytes_read == 0 && curr_window_start == sent_seq_num) {
             break;
         }
     }
