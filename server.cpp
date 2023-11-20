@@ -3,8 +3,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <set> 
 
 #include "utils.h"
+using namespace std; 
 
 void rec_file2(int listen_sock, int send_sock, FILE* filename);
 int main() {
@@ -62,5 +64,26 @@ int main() {
     return 0;
 }
 void rec_file2(int listen_sock, int send_sock, FILE* filename){
+    char storage[300][MAX_PACKET_SIZE] = {0}; //random access storage for packets, out of order, index stored in pointers
+    char* pointers[200] = {0};  //pointers to the corresponding message, index is sequence number
+    int next_package;
+    set<int> index; //currently inuse storage indexes 
+    int i=0; 
+    //receve msg
 
+
+        while i ++ % 300 not in set continue; 
+
+        read(storage[i])
+        sequence number = storage[0];
+        if !pointer[sequencenumber]{ //only do this if 
+            pointer[sequence number ]= i
+            set.add(i)
+            do {
+                write(pointers[sequencenumber])
+                pointers[sequencenumber] = nullptr
+                set.delete(i)
+                seq = (seq+1)%200; 
+            }while(pointer[seq] != nullptr)
+        }
 }

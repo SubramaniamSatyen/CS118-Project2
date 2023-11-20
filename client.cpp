@@ -96,7 +96,7 @@ void serve_local_file(int listen_sock, int send_sock, FILE* file) {
     unsigned long sent_seq_num = 1;
     unsigned long curr_window_start = sent_seq_num;
     fseek(file, 0L, SEEK_END);
-    int total_bytes = ftell(file);
+    int total_bytes = ftell(file); //unsigned int
     fseek(file, 0L, SEEK_SET);
         
 
@@ -107,7 +107,7 @@ void serve_local_file(int listen_sock, int send_sock, FILE* file) {
             bytes_read = fread(payload_pointer, 1, PAYLOAD_SIZE - 1, file);            
             // If reached end of file, no transmission
             if (bytes_read == 0){
-                continue;
+                continue; 
             }
 
             // Set sequence number and send packet
@@ -199,8 +199,8 @@ void serve_local_file2(int listen_sock, int send_sock, FILE* filename){
             if(ack > start){//if not duplicate ack
                 //fix the condition to work properly with wrapping
                 //working on ack sending next expected byte
-                int diff = start - ack;                 
-                start+= diff;  
+                int diff = ack - start;                 
+                start += diff;  
 
                 last_ack = ack; 
                 
@@ -219,27 +219,22 @@ void serve_local_file2(int listen_sock, int send_sock, FILE* filename){
 
             }else if(ack == start) {//if duplicate ack
                 //change to work with the new ack/start
-
-                //only count it if 
                 
                 if(++last_ack_cnt == 3){
                     ssh = max(2, int(cwnd/2));
                     cwnd = ssh + 3;
                     packet_lost=true; 
                 }
-                if(last_ack_cnt >= 3){
+                if(last_ack_cnt > 3){
                     cwnd++;
                 }
-                 
             }
-                
         }
-        
         
         //if we can send more packets
         if(timedout){
 
-        }else if (packet_lost){
+        // }else if (packet_lost){ // implement in the listen section
             
         }
         else if (end <= start + cwnd){
@@ -253,7 +248,8 @@ void serve_local_file2(int listen_sock, int send_sock, FILE* filename){
 
         }
 
-
+        if (end <= start + cwnd){
+        }
         //if timeout
         //difftime https://cplusplus.com/reference/ctime/difftime/
         //returns double of time in seconds, current timeout is 2 seconds
