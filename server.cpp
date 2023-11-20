@@ -67,7 +67,8 @@ void rec_file2(int listen_sock, int send_sock, FILE* filename){
     char storage[300][MAX_PACKET_SIZE] = {0}; //random access storage for packets, out of order, index stored in pointers
     char* pointers[200] = {0};  //pointers to the corresponding message, index is sequence number
     int next_package;
-    set<int> index; //currently inuse storage indexes 
+    set<int> index; //currently inuse storage indexes //or just array of bool
+    bool occupied_storage[300];
     int i=0; 
     //receve msg
 

@@ -1,0 +1,9 @@
+https://www.geeksforgeeks.org/udp-server-client-implementation-c/
+https://cplusplus.com/reference/ctime/
+
+do we need to retransmit multiple times in case retransmit is also lost
+
+
+window size : 
+-also max window size
+-100
