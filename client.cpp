@@ -254,5 +254,7 @@ void serve_local_file2(int listen_sock, int send_sock, FILE* filename){
         //difftime https://cplusplus.com/reference/ctime/difftime/
         //returns double of time in seconds, current timeout is 2 seconds
         timedout = difftime(last_sent_time, time(NULL)) > TIMEOUT; 
+
+        
     }
 }

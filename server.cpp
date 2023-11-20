@@ -6,6 +6,8 @@
 #include <set> 
 
 #include "utils.h"
+
+#define STORAGE_SIZE 300
 using namespace std; 
 
 void rec_file2(int listen_sock, int send_sock, FILE* filename);
@@ -64,27 +66,81 @@ int main() {
     return 0;
 }
 void rec_file2(int listen_sock, int send_sock, FILE* filename){
-    char storage[300][MAX_PACKET_SIZE] = {0}; //random access storage for packets, out of order, index stored in pointers
-    char* pointers[200] = {0};  //pointers to the corresponding message, index is sequence number
-    int next_package;
-    set<int> index; //currently inuse storage indexes //or just array of bool
-    bool occupied_storage[300];
-    int i=0; 
-    //receve msg
+    //storing packets
+    char storage[STORAGE_SIZE][MAX_PACKET_SIZE]; //random access storage for packets, out of order, index stored in stored_records
+    struct record{
+        char* msg_pointer;      //pointer for convienence and easy way to check if valid
+        unsigned short index;   //index in storage
+        unsigned short length;  //length of message (packet size - 1)
 
+    } stored_records[RECIEVE_WINDOW_SIZE] = {nullptr, 0, 0}; //struct stores pointer in storage and the length of the read in file
+    bool occupied_storage[STORAGE_SIZE] = {false}; //to keep track of what indexes are in use, true means in use
+    unsigned short storage_index=0; 
+    //unsigned char stored_records[RECIEVE_WINDOW_SIZE] = {0}; //index is sequence number, value is index in storage 
+    
+    //for reading in packets
+    int bytes_processed;
+    unsigned char in_packet_number;    
 
-        while i ++ % 300 not in set continue; 
+    //for writing into file, sending ack
+    unsigned char next_packet = 0; //start at 0
+    unsigned char* next_packet_addr= &next_packet; 
 
-        read(storage[i])
-        sequence number = storage[0];
-        if !pointer[sequencenumber]{ //only do this if 
-            pointer[sequence number ]= i
-            set.add(i)
-            do {
-                write(pointers[sequencenumber])
-                pointers[sequencenumber] = nullptr
-                set.delete(i)
-                seq = (seq+1)%200; 
-            }while(pointer[seq] != nullptr)
+    
+    while(true){
+        //find next avilable index in storage to read message into
+        while(occupied_storage[storage_index]){
+            storage_index = (storage_index+1)%STORAGE_SIZE;
         }
+
+        //read in file to storage
+        bytes_processed = recv(listen_sock, storage[storage_index], MAX_PACKET_SIZE, 0);
+            //Q : should we bother with error checking ? 
+        //if(bytes_processed == -1){perror("bad read");close(listen_sock);exit(1); }
+
+        //connect new storage to record if it is a new message
+        in_packet_number = storage[storage_index][0];                                           //msg is 1 byte header of seq number
+        if(stored_records[in_packet_number].msg_pointer == nullptr){                            // if have not recieved packet, build record
+            occupied_storage[storage_index] = true;
+            stored_records[in_packet_number].msg_pointer = storage[storage_index] + HEADER_SIZE; 
+            stored_records[in_packet_number].index = storage_index;
+            stored_records[in_packet_number].length = bytes_processed - HEADER_SIZE;                      
+
+        }//no need for else, will correctly run next sections
+
+        //read to file (if correct)
+        while(stored_records[next_packet].msg_pointer != nullptr){
+            storage_index = stored_records[next_packet].index;
+            bytes_processed = fwrite(stored_records[next_packet].msg_pointer, 1, stored_records[next_packet].length, filename);
+            //if(bytes_processed != stored_records[next_packet].length){perror("bad write");close(listen_sock);exit(1); }
+            //if fwrite returns value not equal to .length, fail (not checking) 
+
+            //mark everything as empty
+            occupied_storage[storage_index] = false;
+            stored_records[next_packet].msg_pointer = nullptr;
+
+            //go to next packet
+            next_packet = (next_packet+1)%RECIEVE_WINDOW_SIZE; 
+        }
+
+        //send ack message for next expected packet
+        bytes_processed = send(send_sock, next_packet_addr, HEADER_SIZE, 0);
+        //if(bytes_processed == -1){perror("bad ack");close(listen_sock);exit(1); }
+    }
 }
+
+
+    // while i ++ % 300 not in set continue; 
+
+    // read(storage[i])
+    // sequence number = storage[0];
+    // if !pointer[sequencenumber]{ //only do this if 
+    //     pointer[sequence number ]= i
+    //     set.add(i)
+    //     do {
+    //         write(pointers[sequencenumber])
+    //         pointers[sequencenumber] = nullptr
+    //         set.delete(i)
+    //         seq = (seq+1)%200; 
+    //     }while(pointer[seq] != nullptr)
+    // }
