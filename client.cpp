@@ -169,7 +169,7 @@ void serve_local_file2(int listen_sock, int send_sock, FILE* filename){
     //ssh is for exp start
 
     unsigned int cwnd_frac = 0; // to store fraction of cwnd during congestion avoidance
-    time_t last_sent_time; 
+    time_t last_sent_time = time(NULL); 
     
     //128 max window size,  range for seq / ack , 255 for end ? 
     // for turn off ? 
@@ -192,34 +192,45 @@ void serve_local_file2(int listen_sock, int send_sock, FILE* filename){
     while (true){
         //listen for packet
         message_size = recv(listen_sock, full_buffer, 1, MSG_DONTWAIT);
-        if(message_size > 0){
+        if(message_size > 0){ //if we have received an ack
             //depends on message size
             ack = full_buffer[0];
 
-            //change this condition to work properly with 
-            if(start<ack){//working on ack sending next expected byte
-                int diff = start - ack; 
-
-                timedout = false;
-                packet_lost = false; 
-
+            if(ack > start){//if not duplicate ack
+                //fix the condition to work properly with wrapping
+                //working on ack sending next expected byte
+                int diff = start - ack;                 
                 start+= diff;  
 
                 last_ack = ack; 
                 
-                if (cwnd <= ssh){
+                if (cwnd <= ssh){//slow start
                     cwnd += diff;
-                }else{
+                }else{//congestion avoidance
                     cwnd_frac+= diff;
                     if (cwnd_frac >= cwnd){
                         cwnd_frac %= cwnd;
                         cwnd++; 
                     }
                 }
-            }else{
-                if(++last_ack_cnt >= 3){
+
+                timedout = false;
+                packet_lost = false; 
+
+            }else if(ack == start) {//if duplicate ack
+                //change to work with the new ack/start
+
+                //only count it if 
+                
+                if(++last_ack_cnt == 3){
+                    ssh = max(2, int(cwnd/2));
+                    cwnd = ssh + 3;
                     packet_lost=true; 
                 }
+                if(last_ack_cnt >= 3){
+                    cwnd++;
+                }
+                 
             }
                 
         }
@@ -228,6 +239,8 @@ void serve_local_file2(int listen_sock, int send_sock, FILE* filename){
         //if we can send more packets
         if(timedout){
 
+        }else if (packet_lost){
+            
         }
         else if (end <= start + cwnd){
             
@@ -242,5 +255,8 @@ void serve_local_file2(int listen_sock, int send_sock, FILE* filename){
 
 
         //if timeout
+        //difftime https://cplusplus.com/reference/ctime/difftime/
+        //returns double of time in seconds, current timeout is 2 seconds
+        timedout = difftime(last_sent_time, time(NULL)) > TIMEOUT; 
     }
 }
