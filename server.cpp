@@ -6,6 +6,7 @@
 
 #include "utils.h"
 
+void rec_file2(int listen_sock, int send_sock, FILE* filename);
 int main() {
     int listen_sockfd, send_sockfd;
     struct sockaddr_in server_addr, client_addr_from, client_addr_to;
@@ -53,10 +54,13 @@ int main() {
 
     // TODO: Receive file from the client and save it as output.txt
 
-    
+    rec_file2(listen_sockfd,  send_sockfd, fp);
 
     fclose(fp);
     close(listen_sockfd);
     close(send_sockfd);
     return 0;
+}
+void rec_file2(int listen_sock, int send_sock, FILE* filename){
+
 }

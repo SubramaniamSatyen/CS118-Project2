@@ -16,6 +16,12 @@
 #define TIMEOUT 2
 #define MAX_SEQUENCE 1024
 
+//Our macros
+#define MAX_PACKET_SIZE 1200
+#define HEADER_SIZE 1
+#define TEXT_SIZE MAX_PACKET_SIZE MAX_PACKET_SIZE-HEADER_SIZE
+#define START_SSTHRESH 4
+
 
 
 // Packet Layout

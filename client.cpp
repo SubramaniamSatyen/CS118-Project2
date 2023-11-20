@@ -20,6 +20,8 @@ using namespace std;
 
 void serve_local_file(int listen_sock, int send_sock, FILE* filename);
 void send_packet(int listen_sock, int send_sock, char* packet);
+void serve_local_file2(int listen_sock, int send_sock, FILE* filename);
+
 
 int main(int argc, char *argv[]) {
     int listen_sockfd, send_sockfd;
@@ -157,4 +159,88 @@ void serve_local_file(int listen_sock, int send_sock, FILE* file) {
 }
 
 void send_packet(int listen_sock, int send_sock, char* packet) {
+}
+
+void serve_local_file2(int listen_sock, int send_sock, FILE* filename){
+    unsigned int start = 0, end = 0, cwnd = 1, ssh = START_SSTHRESH; 
+    //start is the packet expected to be acked
+    //end is the packet most recently sent
+    //cwnd is window size: send packets till end > start + cwnd
+    //ssh is for exp start
+
+    unsigned int cwnd_frac = 0; // to store fraction of cwnd during congestion avoidance
+    time_t last_sent_time; 
+    
+    //128 max window size,  range for seq / ack , 255 for end ? 
+    // for turn off ? 
+    
+    //buffer stuff
+    char full_buffer[MAX_PACKET_SIZE];
+    char* seq_num = full_buffer; 
+    char* message_start = full_buffer + HEADER_SIZE; 
+    size_t message_size; 
+
+    //ack
+    //reuse message buffer
+    char ack; 
+    char last_ack = 0;
+    int last_ack_cnt = 0; 
+    bool timedout = false; 
+    bool packet_lost = true; 
+
+
+    while (true){
+        //listen for packet
+        message_size = recv(listen_sock, full_buffer, 1, MSG_DONTWAIT);
+        if(message_size > 0){
+            //depends on message size
+            ack = full_buffer[0];
+
+            //change this condition to work properly with 
+            if(start<ack){//working on ack sending next expected byte
+                int diff = start - ack; 
+
+                timedout = false;
+                packet_lost = false; 
+
+                start+= diff;  
+
+                last_ack = ack; 
+                
+                if (cwnd <= ssh){
+                    cwnd += diff;
+                }else{
+                    cwnd_frac+= diff;
+                    if (cwnd_frac >= cwnd){
+                        cwnd_frac %= cwnd;
+                        cwnd++; 
+                    }
+                }
+            }else{
+                if(++last_ack_cnt >= 3){
+                    packet_lost=true; 
+                }
+            }
+                
+        }
+        
+        
+        //if we can send more packets
+        if(timedout){
+
+        }
+        else if (end <= start + cwnd){
+            
+            //slow start
+            if(cwnd <= ssh){
+
+            }else{
+
+            }
+
+        }
+
+
+        //if timeout
+    }
 }
