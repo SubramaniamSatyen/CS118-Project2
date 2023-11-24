@@ -15,7 +15,7 @@ void rec_file(int listen_sock, int send_sock, FILE* filename, sockaddr_in send_a
 
 int main() {
     int listen_sockfd, send_sockfd;
-    struct sockaddr_in server_addr, client_addr_from, client_addr_to;
+    struct sockaddr_in server_addr, client_addr_to;
 
     // Create a UDP socket for sending
     send_sockfd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -94,10 +94,24 @@ void rec_file(int listen_sock, int send_sock, FILE* filename, sockaddr_in send_a
                 }
                 break;
             }
+            // If packet not able to fit in receiver window, then don't buffer it (ex: duplicate of already written packet)
+            bool bufferable_seq_num = false;
+            for (unsigned long i = seq_num_to_write; i < seq_num_to_write + MAX_WINDOW_SIZE; i++){
+                if (i % max_window == curr_seq_num) {
+                    bufferable_seq_num = true;
+                    break;
+                }
+            }
 
-            if (stored_records[curr_seq_num].packet == nullptr) {
+            if (stored_records[curr_seq_num].packet == nullptr && bufferable_seq_num) {
                 stored_records[curr_seq_num] = { storage[next_free_buffer] + HEADER_SIZE, bytes_read - HEADER_SIZE };
                 next_free_buffer = (next_free_buffer + 1) % STORAGE_SIZE;
+            }
+            // If received duplicate packet in window update packet info
+            else if (stored_records[curr_seq_num].packet != nullptr && bufferable_seq_num){
+                printf("SERVER LOGGING: DUPLICATE PACKET | replacing buffered %u bytes from seq #: %u \n", bytes_read, curr_seq_num);
+                memcpy(stored_records[curr_seq_num].packet, storage[next_free_buffer] + HEADER_SIZE, bytes_read - HEADER_SIZE);
+                stored_records[curr_seq_num].length = bytes_read - HEADER_SIZE;
             }
         }
 
@@ -109,7 +123,7 @@ void rec_file(int listen_sock, int send_sock, FILE* filename, sockaddr_in send_a
             }
 
             // TODO: Handle case of bytes_written = 0 or not equal length...
-            stored_records[seq_num_to_write % max_window] = { nullptr, 0 };
+            stored_records[seq_num_to_write] = { nullptr, 0 };
             seq_num_to_write = (seq_num_to_write + 1) % max_window;
         }
 
