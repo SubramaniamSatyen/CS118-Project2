@@ -24,7 +24,7 @@ void serve_local_file2(int listen_sock, int send_sock, FILE* filename);
 
 int main(int argc, char *argv[]) {
     int listen_sockfd, send_sockfd;
-    struct sockaddr_in client_addr, server_addr_to, server_addr_from;
+    struct sockaddr_in client_addr, server_addr_to;
     socklen_t addr_size = sizeof(server_addr_to);
 
     // read filename from command line argument
@@ -135,7 +135,7 @@ void serve_local_file(int listen_sock, int send_sock, FILE* file, sockaddr_in se
                 }
                 // If the ACK message isn't requesting the start of the window, then we can move window forward
                 if (*rec_buffer != curr_window_start){
-                    for (unsigned long i = curr_window_start; i < curr_window_start + WINDOW_SIZE; i++){
+                    for (unsigned long i = curr_window_start; i < curr_window_start + WINDOW_SIZE + 1; i++){
                         if (i % max_window == *rec_buffer){
                             curr_window_start = i;
                             break;
@@ -157,7 +157,7 @@ void serve_local_file(int listen_sock, int send_sock, FILE* file, sockaddr_in se
             long int current_position = ftell(file);
 
             // Reading conent to send
-            fseek(file, curr_window_start - 1, SEEK_SET);
+            fseek(file, (curr_window_start - 1) * (PAYLOAD_SIZE - HEADER_SIZE), SEEK_SET);
             bytes_read = fread(payload_pointer, 1, PAYLOAD_SIZE - HEADER_SIZE, file);   
             fseek(file, current_position, SEEK_SET);   
 
