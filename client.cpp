@@ -135,7 +135,12 @@ void serve_local_file(int listen_sock, int send_sock, FILE* file, sockaddr_in se
                 }
                 // If the ACK message isn't requesting the start of the window, then we can move window forward
                 if (*rec_buffer != curr_window_start){
-                    curr_window_start = *rec_buffer;
+                    for (unsigned long i = curr_window_start; i < curr_window_start + WINDOW_SIZE; i++){
+                        if (i % max_window == *rec_buffer){
+                            curr_window_start = i;
+                            break;
+                        }
+                    }
                 }
                 else {
                     // TODO: Any logic for handling triple ACKS, etc. (think we can rely on timeouts for initial implementation)

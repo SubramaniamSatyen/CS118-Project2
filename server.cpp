@@ -110,7 +110,7 @@ void rec_file(int listen_sock, int send_sock, FILE* filename, sockaddr_in send_a
 
             // TODO: Handle case of bytes_written = 0 or not equal length...
             stored_records[seq_num_to_write % max_window] = { nullptr, 0 };
-            seq_num_to_write += 1;
+            seq_num_to_write = (seq_num_to_write + 1) % max_window;
         }
 
         // Send ACK for latest received message
