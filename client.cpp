@@ -13,15 +13,14 @@
 #include <regex>
 #include "utils.h"
 #include <ctime>
+#include <poll.h>
 
 #define CHECK_BIT(var,pos) ((var) & (1<<(pos)))
 
 using namespace std;
 
-void serve_local_file(int listen_sock, int send_sock, FILE* filename);
-void send_packet(int listen_sock, int send_sock, char* packet);
+void serve_local_file(int listen_sock, int send_sock, FILE* file, sockaddr_in send_addr, sockaddr_in rec_addr);
 void serve_local_file2(int listen_sock, int send_sock, FILE* filename);
-
 
 int main(int argc, char *argv[]) {
     int listen_sockfd, send_sockfd;
@@ -78,7 +77,7 @@ int main(int argc, char *argv[]) {
     }
 
     // TODO: Read from file, and initiate reliable data transfer to the server
-    serve_local_file(listen_sockfd, send_sockfd, fp);
+    serve_local_file(listen_sockfd, send_sockfd, fp, server_addr_to, client_addr);
     
     fclose(fp);
     close(listen_sockfd);
@@ -86,11 +85,18 @@ int main(int argc, char *argv[]) {
     return 0;
 }
 
-void serve_local_file(int listen_sock, int send_sock, FILE* file) {
+void serve_local_file(int listen_sock, int send_sock, FILE* file, sockaddr_in send_addr, sockaddr_in rec_addr) {
     char send_buffer[PAYLOAD_SIZE];
     char* payload_pointer = send_buffer + 1;
-    char* seq_pointer = send_buffer;
-    char rec_buffer[PAYLOAD_SIZE];
+    unsigned char* seq_pointer = (unsigned char*)send_buffer;
+    unsigned char rec_buffer[PAYLOAD_SIZE];
+    struct pollfd fds[1];
+    fds[0].fd = listen_sock;
+    fds[0].events = POLLIN;
+    int max_window = RECIEVE_WINDOW_SIZE;
+
+
+    socklen_t sock_addr_len = sizeof(rec_addr);
 
     // Initializing variables
     unsigned long sent_seq_num = 1;
@@ -100,27 +106,33 @@ void serve_local_file(int listen_sock, int send_sock, FILE* file) {
     fseek(file, 0L, SEEK_SET);
         
 
-    size_t bytes_read;
+    size_t bytes_read, ack_bytes_read;
     time_t timeout_start;
     while (true){
         if (sent_seq_num < curr_window_start + WINDOW_SIZE){
-            bytes_read = fread(payload_pointer, 1, PAYLOAD_SIZE - 1, file);            
+            bytes_read = fread(payload_pointer, 1, PAYLOAD_SIZE - HEADER_SIZE, file);   
             // If reached end of file, no transmission
-            if (bytes_read == 0){
-                continue; 
+            if (bytes_read > 0){
+                // Set sequence number and send packet
+                if (LOGGING_ENABLED) { 
+                    printf("CLIENT LOGGING: SEND | Sending seq #: %u, %u bytes \n", sent_seq_num, (bytes_read + HEADER_SIZE));
+                }
+                *seq_pointer = sent_seq_num % max_window;
+                sendto(send_sock, send_buffer, bytes_read + HEADER_SIZE, 0, (struct sockaddr*)&send_addr, sizeof(send_addr));
+                sent_seq_num += 1;
+                timeout_start = time(nullptr);
             }
-
-            // Set sequence number and send packet
-            *seq_pointer = sent_seq_num % 256;
-            send_packet(listen_sock, send_sock, send_buffer);
-            sent_seq_num += 1;
-            timeout_start = time(nullptr);
         } 
-        else {
-            bytes_read = recv(listen_sock, rec_buffer, PAYLOAD_SIZE, MSG_DONTWAIT);
+        
+        int listen_results = poll(fds, 1, 100);
+        if (listen_results > 0 && fds[0].revents & POLLIN){
+            ack_bytes_read = recvfrom(listen_sock, rec_buffer, PAYLOAD_SIZE, MSG_DONTWAIT, (struct sockaddr*)&rec_addr, &sock_addr_len);
             int read_error = errno;
             // Handle processing of ACK
-            if (bytes_read > 0 && read_error != EWOULDBLOCK){
+            if (ack_bytes_read > 0 && read_error != EWOULDBLOCK){
+                if (LOGGING_ENABLED) { 
+                    printf("CLIENT LOGGING: ACKED | received ack for seq #: %u, %u bytes \n", *rec_buffer, ack_bytes_read);
+                }
                 // If the ACK message isn't requesting the start of the window, then we can move window forward
                 if (*rec_buffer != curr_window_start){
                     curr_window_start = *rec_buffer;
@@ -129,26 +141,28 @@ void serve_local_file(int listen_sock, int send_sock, FILE* file) {
                     // TODO: Any logic for handling triple ACKS, etc. (think we can rely on timeouts for initial implementation)
                 }
             }
-            else if (read_error == EWOULDBLOCK && bytes_read <= 0) {
+            else if (read_error == EWOULDBLOCK && ack_bytes_read <= 0) {
                 // TODO: Handle error with read
             }
+        }
 
-            // Handle timeouts
-            if (TIMEOUT + timeout_start < time(nullptr)) {
-                // Storing current position
-                long int current_position = ftell(file);
+        // Handle timeouts
+        if (difftime(TIMEOUT + timeout_start, time(nullptr)) < 0) {
+            // Storing current position
+            long int current_position = ftell(file);
 
-                // Reading conent to send
-                fseek(file, curr_window_start, SEEK_SET);
-                bytes_read = fread(payload_pointer, 1, PAYLOAD_SIZE - 1, file);   
-                fseek(file, current_position, SEEK_SET);   
+            // Reading conent to send
+            fseek(file, curr_window_start - 1, SEEK_SET);
+            bytes_read = fread(payload_pointer, 1, PAYLOAD_SIZE - HEADER_SIZE, file);   
+            fseek(file, current_position, SEEK_SET);   
 
-                // Set sequence number and send packet
-                *seq_pointer = curr_window_start % 256;
-                send_packet(listen_sock, send_sock, send_buffer);
-                sent_seq_num += 1;
-                timeout_start = time(nullptr);
+            // Set sequence number and send packet
+            if (LOGGING_ENABLED) {
+                printf("CLIENT LOGGING: TIMEOUT | Resending seq #: %u, %u bytes \n", curr_window_start, (bytes_read + HEADER_SIZE));
             }
+            *seq_pointer = curr_window_start % max_window;
+            sendto(send_sock, send_buffer, bytes_read + HEADER_SIZE, 0, (struct sockaddr*)&send_addr, sizeof(send_addr));
+            timeout_start = time(nullptr);
         }
 
         // If we've finished transmitting and do not have any further ACKS to receive, finish up
@@ -156,9 +170,50 @@ void serve_local_file(int listen_sock, int send_sock, FILE* file) {
             break;
         }
     }
-}
 
-void send_packet(int listen_sock, int send_sock, char* packet) {
+    // Sending notifications to close connection
+    int attempts = 0;
+    *seq_pointer = CLOSE_PACKET_NUM;
+
+    if (LOGGING_ENABLED) {
+        printf("CLIENT LOGGING: CLOSING REQ | Requesting closing #: %u, %u bytes \n", *seq_pointer, 1);
+    }
+    sendto(send_sock, send_buffer, 1, 0, (struct sockaddr*)&send_addr, sizeof(send_addr));
+    attempts += 1;
+    timeout_start = time(nullptr);
+    while (true) {
+        // Resend closing message
+        if (difftime(TIMEOUT + timeout_start, time(nullptr)) < 0){
+            sendto(send_sock, send_buffer, HEADER_SIZE, 0, (struct sockaddr*)&send_addr, sizeof(send_addr));
+            timeout_start = time(nullptr);
+            if (LOGGING_ENABLED) {
+                printf("CLIENT LOGGING: CLOSING REQ | Requesting closing #: %u, %u bytes \n", *seq_pointer, 1);
+            }
+            attempts += 1;
+            if (attempts > 5){
+                break;
+            }
+        }
+        
+        int listen_results = poll(fds, 1, 100);
+        if (listen_results > 0 && fds[0].revents & POLLIN){
+            ack_bytes_read = recvfrom(listen_sock, rec_buffer, PAYLOAD_SIZE, MSG_DONTWAIT, (struct sockaddr*)&rec_addr, &sock_addr_len);
+            int read_error = errno;
+            // Handle processing of ACK
+            if (ack_bytes_read > 0 && read_error != EWOULDBLOCK){
+                if (LOGGING_ENABLED) {
+                    printf("CLIENT LOGGING: CLOSING REQ RECEIVED | Requesting closing #: %u\n", *rec_buffer);
+                }
+                if (*rec_buffer == CLOSE_PACKET_NUM){
+                    if (LOGGING_ENABLED) { 
+                        char curr_seq_num = *rec_buffer;
+                        printf("CLIENT LOGGING: TERMINATING ACK | closing connection");
+                    }
+                    break;
+                }
+            }
+        }
+    }
 }
 
 void serve_local_file2(int listen_sock, int send_sock, FILE* filename){

@@ -11,14 +11,11 @@
 using namespace std; 
 
 void rec_file2(int listen_sock, int send_sock, FILE* filename);
+void rec_file(int listen_sock, int send_sock, FILE* filename, sockaddr_in send_addr, sockaddr_in rec_addr);
+
 int main() {
     int listen_sockfd, send_sockfd;
     struct sockaddr_in server_addr, client_addr_from, client_addr_to;
-    struct packet buffer;
-    socklen_t addr_size = sizeof(client_addr_from);
-    int expected_seq_num = 0;
-    int recv_len;
-    struct packet ack_pkt;
 
     // Create a UDP socket for sending
     send_sockfd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -57,14 +54,74 @@ int main() {
     FILE *fp = fopen("output.txt", "wb");
 
     // TODO: Receive file from the client and save it as output.txt
-
-    rec_file2(listen_sockfd,  send_sockfd, fp);
+    rec_file(listen_sockfd,  send_sockfd, fp, client_addr_to, server_addr);
+    // rec_file2(listen_sockfd,  send_sockfd, fp);
 
     fclose(fp);
     close(listen_sockfd);
     close(send_sockfd);
     return 0;
 }
+
+void rec_file(int listen_sock, int send_sock, FILE* filename, sockaddr_in send_addr, sockaddr_in rec_addr){
+    char storage[STORAGE_SIZE][MAX_PACKET_SIZE];
+    struct record {
+        char* packet;      //pointer for convienence and easy way to check if valid
+        int length;  //length of message (packet size - 1)
+    };
+    unsigned long seq_num_to_write = 1;
+    socklen_t sock_addr_len = sizeof(rec_addr);
+    int max_window = RECIEVE_WINDOW_SIZE;
+
+    record stored_records[RECIEVE_WINDOW_SIZE] = {nullptr, 0}; //struct stores pointer in storage and the length of the read in file
+    int next_free_buffer = 0, bytes_read = 0, bytes_written = 0, bytes_acked = 0;
+    while (true){
+        // Read next message 
+        bytes_read = recvfrom(listen_sock, storage[next_free_buffer], MAX_PACKET_SIZE, 0, (struct sockaddr*)&rec_addr, &sock_addr_len);
+
+        // If message recieved and haven't recieved the seq_num yet, then store it, and move to next read buffer
+        if (bytes_read > 0){
+            unsigned char curr_seq_num = *(storage[next_free_buffer]);
+            if (LOGGING_ENABLED) { 
+                printf("SERVER LOGGING: RECEIVED | received seq #: %u, read %u bytes\n", curr_seq_num, bytes_read);
+            }
+
+            if (curr_seq_num == CLOSE_PACKET_NUM) {
+                unsigned char ack_num = CLOSE_PACKET_NUM;
+                bytes_acked = sendto(send_sock, &ack_num, 1, 0, (struct sockaddr*)&send_addr, sizeof(send_addr));
+                if (LOGGING_ENABLED) { 
+                    printf("SERVER LOGGING: CLOSE ACK | sent closing ack #: %u, read %u bytes\n", ack_num, bytes_acked);
+                }
+                break;
+            }
+
+            if (stored_records[curr_seq_num].packet == nullptr) {
+                stored_records[curr_seq_num] = { storage[next_free_buffer] + HEADER_SIZE, bytes_read - HEADER_SIZE };
+                next_free_buffer = (next_free_buffer + 1) % STORAGE_SIZE;
+            }
+        }
+
+        // Write out any buffers that can be written to file (in order from next expected)
+        while (stored_records[seq_num_to_write].packet != nullptr) {
+            bytes_written = fwrite(stored_records[seq_num_to_write].packet, 1, stored_records[seq_num_to_write].length, filename);
+            if (LOGGING_ENABLED) { 
+                printf("SERVER LOGGING: WRITE | writing %u bytes from seq #: %u \n", bytes_written, seq_num_to_write);
+            }
+
+            // TODO: Handle case of bytes_written = 0 or not equal length...
+            stored_records[seq_num_to_write % max_window] = { nullptr, 0 };
+            seq_num_to_write += 1;
+        }
+
+        // Send ACK for latest received message
+        short ack_num = seq_num_to_write % max_window;
+        bytes_acked = sendto(send_sock, &ack_num, 1, 0, (struct sockaddr*)&send_addr, sizeof(send_addr));
+        if (LOGGING_ENABLED) { 
+            printf("SERVER LOGGING: SENT ACK | sent ack for seq #: %u, %u bytes \n", ack_num, bytes_acked);
+        }
+    }
+}
+
 void rec_file2(int listen_sock, int send_sock, FILE* filename){
     //storing packets
     char storage[STORAGE_SIZE][MAX_PACKET_SIZE]; //random access storage for packets, out of order, index stored in stored_records
