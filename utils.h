@@ -13,7 +13,7 @@
 #define CLIENT_PORT_TO 5001
 #define PAYLOAD_SIZE 1024
 #define WINDOW_SIZE 5
-#define TIMEOUT 2
+#define TIMEOUT 5
 #define MAX_SEQUENCE 1024
 
 //Our macros
@@ -23,7 +23,9 @@
 #define START_SSTHRESH 4
 #define MAX_WINDOW_SIZE 100
 #define RECIEVE_WINDOW_SIZE 2*MAX_WINDOW_SIZE
+#define CLOSE_PACKET_NUM 255
 
+#define LOGGING_ENABLED true
 
 
 // Packet Layout
