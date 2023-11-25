@@ -22,6 +22,8 @@ using namespace std;
 
 void serve_local_file(int listen_sock, int send_sock, FILE* file, sockaddr_in send_addr, sockaddr_in rec_addr);
 void serve_local_file2(int listen_sock, int send_sock, FILE* filename);
+void serve_local_file3(int listen_sock, int send_sock, FILE* filename);
+uint8_t seqdiff(uint8_t start, uint8_t end);
 
 int main(int argc, char *argv[]) {
     int listen_sockfd, send_sockfd;
@@ -392,7 +394,104 @@ void serve_local_file2(int listen_sock, int send_sock, FILE* filename){
         //returns double of time in seconds, current timeout is 2 seconds
         timedout = difftime(last_sent_time, time(NULL)) > TIMEOUT; 
 
-
     }
 }
 
+void serve_local_file3(int listen_sock, int send_sock, FILE* filename){
+    uint8_t start = 0, end = -1, cwnd = 1, cwnd_frac = 0, ssh = START_SSTHRESH;
+    /*start, end : [0-199] current bytes, (end - start < MAX_WINDOW_SIZE) or ((RECIEVE_WINDOW_SIZE - start) + end < MAX_WINDOW_SIZE)
+        start : last unacked packet
+        end : last sent packet (start at -1 to indicate )
+    */
+    //cwnd : [0,100] current window size, this should always be <= 100 
+    //ssh : ssthresh
+    
+    time_t last_sent_time = time(NULL);
+    //time for timeout
+
+    //buffer information
+    char full_buffer[MAX_PACKET_SIZE];
+    char *header_ptr = full_buffer; 
+    char *body_ptr = full_buffer + HEADER_SIZE;
+    size_t message_size;
+    //full buffer : the full message: 1B header with sequence number and 1199B body, also reused for acks
+    //sequence number, message_start : pointers to where they start in our file
+    //size_t for size of message read from file, to be sent on send_sock
+    
+    uint8_t ack;
+    uint last_ack_count;
+    /*ack : next expected packet, should always be 'greater' than start and 'less than or equal' end + 1 (can loop to lower val)
+        if ack is equal to start, this means it was dropped / repeat ack 
+    */
+    //last_ack_count : to count number of repeat acks, could be infinite, but should be less than uint under most circumstances
+    
+    bool timeout = false, fast_retrans = false;
+    //timeout : if timedout
+    //fast_retrans : if we are in fast retrans
+    
+    //helpers
+    uint8_t diff; 
+    size_t bytes_proc;
+    
+
+    while(true){
+        
+        /*
+        check if we have recieved an ack
+        if we have check it is the correct one and modify window size, ssh, etc as necessary
+        */
+        message_size = recv(listen_sock, &ack, HEADER_SIZE, MSG_DONTWAIT);
+        if(message_size > 0){
+            //if repeated ack
+            if(ack == start){
+                last_ack_count++;
+                if(last_ack_count == DUP_ACK_LIMIT){
+                    fast_retrans = true;
+                    ssh = max(2, cwnd/2);
+                    cwnd = ssh + DUP_ACK_LIMIT;
+                } 
+                if(fast_retrans){
+                    //update cwnd if in fast retrans
+                    cwnd = min(cwnd + 1, RECIEVE_WINDOW_SIZE);
+                    
+                    //if more dup acks, we will resend
+                    //TODO: rethink the best way determine if we need to resend packet, keeping in mind chance resend is also lost
+                    if(last_ack_count%DUP_ACK_LIMIT == 0){
+                        //go back to the dropped packet
+                        diff = seqdiff(start, end);
+                        if(fseek(filename, -TEXT_SIZE*diff, SEEK_CUR)){perror("bad fseek backwards");close(listen_sock);exit(1);}
+                        
+                        //build header
+                        *header_ptr = start;
+                        bytes_proc = fread(body_ptr, 1, TEXT_SIZE, filename);
+                        if(bytes_proc == 0){perror("bad reread");close(listen_sock);exit(1);}
+                        
+                        //resend
+                        bytes_proc = send(send_sock, full_buffer, HEADER_SIZE+bytes_proc, 0);
+                        if(bytes_proc == -1){perror("bad resend");close(listen_sock);exit(1);}
+
+                        //return to original place
+                        if(fseek(filename, TEXT_SIZE*(diff-1), SEEK_CUR)){perror("bad fseek forwards");close(listen_sock);exit(1);}
+
+                    }
+
+
+                }
+                
+            }
+        }
+
+
+    }
+
+
+}
+
+//returns the number of packets between end and start
+uint8_t seqdiff(uint8_t start, uint8_t end){
+    if(start < end){
+        return end - start + 1;
+    }else{
+        return (RECIEVE_WINDOW_SIZE - end) + start + 1;
+    }
+}

@@ -175,8 +175,7 @@ void rec_file2(int listen_sock, int send_sock, FILE* filename){
 
         //read in file to storage
         bytes_processed = recv(listen_sock, storage[storage_index], MAX_PACKET_SIZE, 0);
-            //Q : should we bother with error checking ? 
-        //if(bytes_processed == -1){perror("bad read");close(listen_sock);exit(1); }
+        if(bytes_processed == -1){perror("bad read");close(listen_sock);exit(1); }
 
         //connect new storage to record if it is a new message
         in_packet_number = storage[storage_index][0];                                           //msg is 1 byte header of seq number
@@ -192,8 +191,8 @@ void rec_file2(int listen_sock, int send_sock, FILE* filename){
         while(stored_records[next_packet].msg_pointer != nullptr){
             storage_index = stored_records[next_packet].index;
             bytes_processed = fwrite(stored_records[next_packet].msg_pointer, 1, stored_records[next_packet].length, filename);
-            //if(bytes_processed != stored_records[next_packet].length){perror("bad write");close(listen_sock);exit(1); }
-            //if fwrite returns value not equal to .length, fail (not checking) 
+            if(bytes_processed != stored_records[next_packet].length){perror("bad write");close(listen_sock);exit(1); }
+            //if fwrite returns value not equal to .length, fail  
 
             //mark everything as empty
             occupied_storage[storage_index] = false;
@@ -205,7 +204,7 @@ void rec_file2(int listen_sock, int send_sock, FILE* filename){
 
         //send ack message for next expected packet
         bytes_processed = send(send_sock, next_packet_addr, HEADER_SIZE, 0);
-        //if(bytes_processed == -1){perror("bad ack");close(listen_sock);exit(1); }
+        if(bytes_processed == -1){perror("bad ack");close(listen_sock);exit(1); }
     }
 }
 
