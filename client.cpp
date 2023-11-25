@@ -182,6 +182,7 @@ void serve_local_file2(int listen_sock, int send_sock, FILE* filename){
 
     //ack
     //reuse message buffer
+    int start_modded, diff; 
     char ack; 
     char last_ack = 0;
     int last_ack_cnt = 0; 
@@ -196,13 +197,17 @@ void serve_local_file2(int listen_sock, int send_sock, FILE* filename){
             //depends on message size
             ack = full_buffer[0];
 
-            if(ack > start){//if not duplicate ack
-                //fix the condition to work properly with wrapping
-                //working on ack sending next expected byte
-                int diff = ack - start;                 
+            start_modded = start%RECIEVE_WINDOW_SIZE;
+            if(ack > start_modded|| (ack + MAX_WINDOW_SIZE) <= start_modded){//if not duplicate ack
+                //case 1 : ack is greater than start means okay
+                //case 2 : send 100 - 199, ack is 0 
+                if(ack < (start%RECIEVE_WINDOW_SIZE)){
+                    ack += RECIEVE_WINDOW_SIZE;
+                }
+                diff = ack - start_modded;                  
                 start += diff;  
 
-                last_ack = ack; 
+                // last_ack = ack; 
                 
                 if (cwnd <= ssh){//slow start
                     cwnd += diff;
@@ -255,6 +260,7 @@ void serve_local_file2(int listen_sock, int send_sock, FILE* filename){
         //returns double of time in seconds, current timeout is 2 seconds
         timedout = difftime(last_sent_time, time(NULL)) > TIMEOUT; 
 
-        
+
     }
 }
+
