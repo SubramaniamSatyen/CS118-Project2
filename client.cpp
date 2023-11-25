@@ -425,20 +425,33 @@ void serve_local_file3(int listen_sock, int send_sock, FILE* filename){
     */
     //last_ack_count : to count number of repeat acks, could be infinite, but should be less than uint under most circumstances
     
-    bool timeout = false, fast_retrans = false;
-    //timeout : if timedout
+    bool fast_retrans = false;
     //fast_retrans : if we are in fast retrans
+
+    time_t last_sent_time = time(NULL);
     
     //helpers
     uint8_t diff; 
     size_t bytes_proc;
-    
+    unsigned long int filesize;
+
+    //get filesize and return to beginning
+    fseek(filename, 0, SEEK_END);
+    if(ferror(filename)){perror("bad seek to end");exit(1);}
+
+    filesize = ftell(filename);
+    if(filesize == -1){perror("bad ftell");exit(1);}
+
+    fseek(filename, 0, SEEK_SET);
+    if(ferror(filename)){perror("bad seek to begin");exit(1);}
+
 
     while(true){
         
         /*
         check if we have recieved an ack
         if we have check it is the correct one and modify window size, ssh, etc as necessary
+            timeout will be done later down
         */
         message_size = recv(listen_sock, &ack, HEADER_SIZE, MSG_DONTWAIT);
         if(message_size > 0){
@@ -454,7 +467,10 @@ void serve_local_file3(int listen_sock, int send_sock, FILE* filename){
                     //update cwnd if in fast retrans
                     cwnd = min(cwnd + 1, RECIEVE_WINDOW_SIZE);
                     
-                    //if more dup acks, we will resend
+                    /*if more dup acks, we will resend
+                        NOTE: this only works if it always reads TEXT_SIZE amount
+                    */
+                    //TODO : does this work if we need to resend the last packet or would that result in a timeout
                     //TODO: rethink the best way determine if we need to resend packet, keeping in mind chance resend is also lost
                     if(last_ack_count%DUP_ACK_LIMIT == 0){
                         //go back to the dropped packet
@@ -464,11 +480,12 @@ void serve_local_file3(int listen_sock, int send_sock, FILE* filename){
                         //build header
                         *header_ptr = start;
                         bytes_proc = fread(body_ptr, 1, TEXT_SIZE, filename);
-                        if(bytes_proc == 0){perror("bad reread");close(listen_sock);exit(1);}
+                        if(ferror(filename)){perror("bad reread");close(listen_sock);exit(1);}
                         
                         //resend
                         bytes_proc = send(send_sock, full_buffer, HEADER_SIZE+bytes_proc, 0);
                         if(bytes_proc == -1){perror("bad resend");close(listen_sock);exit(1);}
+                        last_sent_time = time(NULL); 
 
                         //return to original place
                         if(fseek(filename, TEXT_SIZE*(diff-1), SEEK_CUR)){perror("bad fseek forwards");close(listen_sock);exit(1);}
@@ -478,10 +495,61 @@ void serve_local_file3(int listen_sock, int send_sock, FILE* filename){
 
                 }
                 
+            }else{
+                diff = seqdiff(start, ack) - 1;
+
+                start = (start + diff) % RECIEVE_WINDOW_SIZE; 
+                //recover from fast retrans
+                if(fast_retrans){
+                    fast_retrans = false;
+                    cwnd = ssh;
+                }
+                if(cwnd <= ssh){
+                    if(cwnd + diff > ssh){
+                        cwnd = ssh;
+                        cwnd_frac = ssh - (cwnd +diff - ssh);
+                    }else{
+                        cwnd = min(cwnd+diff, MAX_WINDOW_SIZE);
+                    }
+                    
+                }else{
+                    cwnd_frac = cwnd_frac + diff;
+                    if(cwnd_frac > cwnd){
+                        cwnd_frac = cwnd_frac%cwnd;
+                        cwnd = min(cwnd+1, MAX_WINDOW_SIZE);
+                    }
+                }
             }
         }
 
 
+        /*
+        check if we can send a packet and send a packet
+        */
+        if (end < ((start + cwnd) % RECIEVE_WINDOW_SIZE)){
+            //read from file
+            end = (end+1) % RECIEVE_WINDOW_SIZE; 
+            *header_ptr = end; 
+            bytes_proc = fread(body_ptr, 1, TEXT_SIZE, filename);
+            if(ferror(filename)){perror("bad read");close(listen_sock);exit(1);}
+
+            //send
+            bytes_proc = send(send_sock, full_buffer, HEADER_SIZE+bytes_proc, 0);
+            if(bytes_proc == -1){perror("bad resend");close(listen_sock);exit(1);}
+            last_sent_time = time(NULL); 
+        }
+
+
+        /*
+            if timeout
+        */
+        if(difftime(last_sent_time, time(NULL)) > TIMEOUT){
+            ssh = max(cwnd/2, START_SSTHRESH); //TODO: should this be start ssthres or 2
+            cwnd = 1;
+            //fseek(filename, ,SEEK_CUR)
+            end = start; 
+
+        }
     }
 
 

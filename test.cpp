@@ -17,7 +17,13 @@
 #include "utils.h"
 using namespace std; 
 int main(){
-    
+    char filename[]= "notes.txt";
+    FILE* fp1 = fopen(filename, "rb");
+    cout << sizeof(ftell(fp1)) << endl;
+    cout << sizeof(int) << endl;
+    cout << sizeof(long int) << endl; 
+    fclose(fp1);
+
 }
 
 void file_exp(){
@@ -44,3 +50,4 @@ void file_exp(){
     
 }
 //nullptr == 0     cout << (nullptr == 0);
+//long int is 8 B
