@@ -116,7 +116,16 @@ void rec_file(int listen_sock, int send_sock, FILE* filename, sockaddr_in send_a
         }
 
         // Write out any buffers that can be written to file (in order from next expected)
-        while (stored_records[seq_num_to_write].packet != nullptr) {
+        while (stored_records[seq_num_to_write].packet != nullptr && stored_records[seq_num_to_write].length != 0) {
+            // TODO: Remove block below (to write seq num before each packet)
+            // char temp[100] = "\n\nsequence num: ";
+            // char str[10 + sizeof(char)]; 
+            // sprintf(str, "%ld", seq_num_to_write); 
+            // strcat(temp, str);
+            // strcat(temp, "\n\n");
+            // bytes_written = fwrite(temp, 1, strlen(temp), filename);
+
+
             bytes_written = fwrite(stored_records[seq_num_to_write].packet, 1, stored_records[seq_num_to_write].length, filename);
             if (LOGGING_ENABLED) { 
                 printf("SERVER LOGGING: WRITE | writing %u bytes from seq #: %u \n", bytes_written, seq_num_to_write);
