@@ -14,6 +14,7 @@
 #include "utils.h"
 #include <ctime>
 #include <poll.h>
+#include <algorithm>
 
 #define CHECK_BIT(var,pos) ((var) & (1<<(pos)))
 
@@ -86,36 +87,39 @@ int main(int argc, char *argv[]) {
 }
 
 void serve_local_file(int listen_sock, int send_sock, FILE* file, sockaddr_in send_addr, sockaddr_in rec_addr) {
+    // Buffer variables (send and receive)
     char send_buffer[PAYLOAD_SIZE];
     char* payload_pointer = send_buffer + 1;
     unsigned char* seq_pointer = (unsigned char*)send_buffer;
     unsigned char rec_buffer[PAYLOAD_SIZE];
+    socklen_t sock_addr_len = sizeof(rec_addr);
+    size_t bytes_read, ack_bytes_read;
+
+    // Polling variables
     struct pollfd fds[1];
     fds[0].fd = listen_sock;
     fds[0].events = POLLIN;
-    int max_window = RECIEVE_WINDOW_SIZE;
 
-
-    socklen_t sock_addr_len = sizeof(rec_addr);
-
-    // Initializing variables
-    unsigned long sent_seq_num = 1;
-    unsigned long curr_window_start = sent_seq_num;
     fseek(file, 0L, SEEK_END);
     int total_bytes = ftell(file); //unsigned int
     fseek(file, 0L, SEEK_SET);
-        
 
-    size_t bytes_read, ack_bytes_read;
+    // Window size variables
+    unsigned int max_window = RECIEVE_WINDOW_SIZE;
+    unsigned long sent_seq_num = 1;
+    unsigned long curr_window_start = sent_seq_num;
     time_t timeout_start;
+    unsigned int cwnd = 1, cwnd_frac = 0, ssh = START_SSTHRESH, dup_ack_count = 0;
+
     while (true){
-        if (sent_seq_num < curr_window_start + WINDOW_SIZE){
+        if (sent_seq_num < curr_window_start + cwnd){
             bytes_read = fread(payload_pointer, 1, PAYLOAD_SIZE - HEADER_SIZE, file);   
             // If reached end of file, no transmission
             if (bytes_read > 0){
                 // Set sequence number and send packet
                 if (LOGGING_ENABLED) { 
                     printf("CLIENT LOGGING: SEND | Sending seq #: %u, %u bytes \n", sent_seq_num, (bytes_read + HEADER_SIZE));
+                    printf("CLIENT LOGGING: WINDOW INFO | window size is %u, starting at %u \n", cwnd, curr_window_start);
                 }
                 *seq_pointer = sent_seq_num % max_window;
                 sendto(send_sock, send_buffer, bytes_read + HEADER_SIZE, 0, (struct sockaddr*)&send_addr, sizeof(send_addr));
@@ -130,20 +134,81 @@ void serve_local_file(int listen_sock, int send_sock, FILE* file, sockaddr_in se
             int read_error = errno;
             // Handle processing of ACK
             if (ack_bytes_read > 0 && read_error != EWOULDBLOCK){
-                if (LOGGING_ENABLED) { 
-                    printf("CLIENT LOGGING: ACKED | received ack for seq #: %u, %u bytes \n", *rec_buffer, ack_bytes_read);
-                }
                 // If the ACK message isn't requesting the start of the window, then we can move window forward
-                if (*rec_buffer != curr_window_start){
-                    for (unsigned long i = curr_window_start; i <= curr_window_start + WINDOW_SIZE + 1; i++){
+                if (*rec_buffer != (curr_window_start % max_window)){
+                    if (LOGGING_ENABLED) { 
+                        printf("CLIENT LOGGING: ACKED | received ack for seq #: %u, %u bytes \n", *rec_buffer, ack_bytes_read);
+                    }
+                    for (unsigned long i = curr_window_start; i <= curr_window_start + MAX_WINDOW_SIZE; i++){
                         if (i % max_window == *rec_buffer){
+                            unsigned int packet_diff = i - curr_window_start;
+                            // Handle exiting out of fast recovery
+                            if (dup_ack_count >= DUP_ACK_LIMIT){
+                                cwnd = ssh;
+                                if (LOGGING_ENABLED) { 
+                                    printf("CLIENT LOGGING: FAST RETRANSMIT | Updating window size to %u, starting at %u \n", cwnd, curr_window_start);
+                                }
+                            }
+                            // Update window size if in slow start
+                            else if (cwnd <= ssh && cwnd < MAX_WINDOW_SIZE){
+                                cwnd += packet_diff;
+                                if (LOGGING_ENABLED) { 
+                                    printf("CLIENT LOGGING: SLOW START | Updating window size to %u, starting at %u \n", cwnd, curr_window_start);
+                                }
+                            }
+                            // Update window size if in congestion avoidance
+                            else if (cwnd < MAX_WINDOW_SIZE){
+                                cwnd_frac += packet_diff;
+                                if (cwnd_frac >= cwnd){
+                                    cwnd_frac %= cwnd;
+                                    cwnd++; 
+                                }
+                                if (LOGGING_ENABLED) { 
+                                    printf("CLIENT LOGGING: CONGESTION AVOID | Updating window size to %u, starting at %u \n", cwnd, curr_window_start);
+                                }
+                            }
+                            dup_ack_count = 0;
                             curr_window_start = i;
                             break;
                         }
                     }
                 }
                 else {
-                    // TODO: Any logic for handling triple ACKS, etc. (think we can rely on timeouts for initial implementation)
+                    dup_ack_count += 1;
+                    if (LOGGING_ENABLED) { 
+                        printf("CLIENT LOGGING: DUP ACK | received ack for seq #: %u, %u bytes \n", *rec_buffer, ack_bytes_read);
+                    }
+                    // Entering fast retransmit 
+                    if (dup_ack_count == DUP_ACK_LIMIT){
+                        long int current_position = ftell(file);
+
+                        // Reading conent to send
+                        fseek(file, (curr_window_start - 1) * (PAYLOAD_SIZE - HEADER_SIZE), SEEK_SET);
+                        bytes_read = fread(payload_pointer, 1, PAYLOAD_SIZE - HEADER_SIZE, file);   
+                        fseek(file, current_position, SEEK_SET);   
+
+                        // Set sequence number and send packet
+                        if (LOGGING_ENABLED) {
+                            printf("CLIENT LOGGING: FAST RETRANSMIT | Resending seq #: %u, %u bytes \n", curr_window_start, (bytes_read + HEADER_SIZE));
+                        }
+                        *seq_pointer = curr_window_start % max_window;
+                        sendto(send_sock, send_buffer, bytes_read + HEADER_SIZE, 0, (struct sockaddr*)&send_addr, sizeof(send_addr));
+                        timeout_start = time(nullptr);
+
+                        // Updating window size
+                        ssh = max(cwnd / 2, (unsigned int)2);
+                        cwnd += ssh + 3;
+                        if (LOGGING_ENABLED) {
+                            printf("CLIENT LOGGING: FAST RETRANSMIT | Updating window size to %u, starting at %u \n", cwnd, curr_window_start);
+                        }
+                    }
+                    // Fast recovery for duplicate ack
+                    else if (dup_ack_count > DUP_ACK_LIMIT){
+                        cwnd += 1;
+                        if (LOGGING_ENABLED) {
+                            printf("CLIENT LOGGING: FAST REC | Updating window size to %u, starting at %u \n", cwnd, curr_window_start);
+                        }
+                    }
                 }
             }
             else if (read_error == EWOULDBLOCK && ack_bytes_read <= 0) {
@@ -168,6 +233,13 @@ void serve_local_file(int listen_sock, int send_sock, FILE* file, sockaddr_in se
             *seq_pointer = curr_window_start % max_window;
             sendto(send_sock, send_buffer, bytes_read + HEADER_SIZE, 0, (struct sockaddr*)&send_addr, sizeof(send_addr));
             timeout_start = time(nullptr);
+
+            // Update window size for timeout
+            ssh = max(cwnd / 2, (unsigned int)2);
+            cwnd = 1;
+            if (LOGGING_ENABLED){
+                printf("CLIENT LOGGING: WINDOW INFO | Upating window size to %u, starting at %u \n", cwnd, curr_window_start);
+            }
         }
 
         // If we've finished transmitting and do not have any further ACKS to receive, finish up
