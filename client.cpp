@@ -86,8 +86,8 @@ int main(int argc, char *argv[]) {
     }
 
     // TODO: Read from file, and initiate reliable data transfer to the server
-    //serve_local_file(listen_sockfd, send_sockfd, fp, server_addr_to, client_addr);
-    serve_local_file3(listen_sockfd,send_sockfd,fp);
+    serve_local_file(listen_sockfd, send_sockfd, fp, server_addr_to, client_addr);
+    // serve_local_file3(listen_sockfd,send_sockfd,fp);
 
     fclose(fp);
     close(listen_sockfd);
@@ -120,7 +120,7 @@ void serve_local_file(int listen_sock, int send_sock, FILE* file, sockaddr_in se
     unsigned long cwnd = 1, cwnd_frac = 0, ssh = START_SSTHRESH, dup_ack_count = 0;
     struct timeval timeout_start, curr, add, cmp;
     add.tv_sec = (int)TIMEOUT;
-    add.tv_usec = TIMEOUT - (int)TIMEOUT;
+    add.tv_usec = (TIMEOUT - (int)TIMEOUT) * 1000000;
 
     struct timeval tval_logging;
 
@@ -241,6 +241,7 @@ void serve_local_file(int listen_sock, int send_sock, FILE* file, sockaddr_in se
 
         gettimeofday(&curr, NULL);
         timeradd(&timeout_start, &add, &cmp);
+        // printf("Curr: %ld.%06ld | Add: %ld.%06ld | TStart: %ld.%06ld | TEnd: %ld.%06ld | cmp: %d", curr.tv_sec, curr.tv_usec, add.tv_sec, add.tv_usec, timeout_start.tv_sec, timeout_start.tv_usec, cmp.tv_sec, cmp.tv_usec, timercmp(&cmp, &curr, <));
         // Handle timeouts
         if (timercmp(&cmp, &curr, <)) {
             // Storing current position

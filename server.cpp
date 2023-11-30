@@ -57,8 +57,8 @@ int main() {
     FILE *fp = fopen("output.txt", "wb");
 
     // TODO: Receive file from the client and save it as output.txt
-    //rec_file(listen_sockfd,  send_sockfd, fp, client_addr_to, server_addr);
-    rec_file2(listen_sockfd,  send_sockfd, fp);
+    rec_file(listen_sockfd,  send_sockfd, fp, client_addr_to, server_addr);
+    // rec_file2(listen_sockfd,  send_sockfd, fp);
 
     fclose(fp);
     close(listen_sockfd);
@@ -87,7 +87,7 @@ void rec_file(int listen_sock, int send_sock, FILE* filename, sockaddr_in send_a
     struct timeval tval_logging;
     struct timeval timeout_start, curr, add, cmp;
     add.tv_sec = (int)(TIMEOUT * CLOSE_MULTI);
-    add.tv_usec = (TIMEOUT * CLOSE_MULTI) - (int)(TIMEOUT * CLOSE_MULTI);
+    add.tv_usec = ((TIMEOUT) - (int)(TIMEOUT)) * (CLOSE_MULTI * 1000000);
 
     while (true){
         // Read next message 
