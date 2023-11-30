@@ -19,11 +19,11 @@
 //Our macros
 #define MAX_PACKET_SIZE 1200
 #define HEADER_SIZE 1
-#define TEXT_SIZE MAX_PACKET_SIZE-HEADER_SIZE
+#define TEXT_SIZE (MAX_PACKET_SIZE-HEADER_SIZE)
 #define START_SSTHRESH 15
 #define DUP_ACK_LIMIT 3
 #define MAX_WINDOW_SIZE 100
-#define RECIEVE_WINDOW_SIZE 2*MAX_WINDOW_SIZE
+#define RECIEVE_WINDOW_SIZE (2*MAX_WINDOW_SIZE)
 #define CLOSE_PACKET_NUM 255
 #define CLOSE_MULTI 5
 
@@ -76,4 +76,12 @@ bool inrange(uint8_t start, uint8_t index, uint8_t cwnd){
     return cwnd > (index - start);
 }
 
+bool isEnd(uint8_t seq, uint8_t final){
+    switch (final){
+        case CLOSE_PACKET_NUM:
+            return false;
+        default: 
+            return (seq-1) == final; 
+    }
+}
 #endif

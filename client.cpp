@@ -21,7 +21,7 @@
 using namespace std;
 
 void serve_local_file(int listen_sock, int send_sock, FILE* file, sockaddr_in send_addr, sockaddr_in rec_addr);
-void serve_local_file2(int listen_sock, int send_sock, FILE* filename);
+//void serve_local_file2(int listen_sock, int send_sock, FILE* filename);
 void serve_local_file3(int listen_sock, int send_sock, FILE* filename);
 
 int main(int argc, char *argv[]) {
@@ -86,8 +86,9 @@ int main(int argc, char *argv[]) {
     }
 
     // TODO: Read from file, and initiate reliable data transfer to the server
-    serve_local_file(listen_sockfd, send_sockfd, fp, server_addr_to, client_addr);
-    
+    //serve_local_file(listen_sockfd, send_sockfd, fp, server_addr_to, client_addr);
+    serve_local_file3(listen_sockfd,send_sockfd,fp);
+
     fclose(fp);
     close(listen_sockfd);
     close(send_sockfd);
@@ -318,7 +319,7 @@ void serve_local_file(int listen_sock, int send_sock, FILE* file, sockaddr_in se
         }
     }
 }
-
+/*
 void serve_local_file2(int listen_sock, int send_sock, FILE* filename){
     unsigned int start = 0, end = 0, cwnd = 1, ssh = START_SSTHRESH; 
     //start is the packet expected to be acked
@@ -420,18 +421,18 @@ void serve_local_file2(int listen_sock, int send_sock, FILE* filename){
 
     }
 }
-
+*/
 void serve_local_file3(int listen_sock, int send_sock, FILE* filename){
-    uint8_t start = 0, end = -1, cwnd = 1, cwnd_frac = 0, ssh = START_SSTHRESH;
+    uint8_t start = 0, end = 0, cwnd = 1, cwnd_frac = 0, ssh = START_SSTHRESH;
     /*start, end : [0-199] current bytes, 
         (end - start + 1 <= MAX_WINDOW_SIZE) or ((RECIEVE_WINDOW_SIZE - start) + end + 1 <= MAX_WINDOW_SIZE)
         start : last unacked packet
-        end : last sent packet (start at -1 to indicate )
+        end : last sent packet
     */
     //cwnd : [2,100] current window size, this should always be <= 100 
     //ssh : ssthresh
     
-    // time_t last_sent_time = time(NULL);
+    time_t last_sent_time = time(NULL);
     //time for timeout
 
     //buffer information
@@ -450,12 +451,11 @@ void serve_local_file3(int listen_sock, int send_sock, FILE* filename){
     
     bool fast_retrans = false;
     //fast_retrans : if we are in fast retrans
-
-    time_t last_sent_time = time(NULL);
     
     //helpers
     uint8_t diff; 
     size_t bytes_proc;
+    bool not_eof = true;
     
     /*
     unsigned long int filesize;
@@ -470,8 +470,24 @@ void serve_local_file3(int listen_sock, int send_sock, FILE* filename){
     fseek(filename, 0, SEEK_SET);
     if(ferror(filename)){perror("bad seek to begin");exit(1);}
     */
+    printf("start %u, end %u\n", start, end);
+    *header_ptr = end; 
+    bytes_proc = fread(body_ptr, 1, TEXT_SIZE, filename);
+    if(ferror(filename)){perror("bad read");close(listen_sock);exit(1);}
 
-    while(true){    
+    //send
+    bytes_proc = send(send_sock, full_buffer, HEADER_SIZE+bytes_proc, 0);
+    if(bytes_proc == -1){perror("bad resend");close(listen_sock);exit(1);}
+    last_sent_time = time(NULL); 
+    
+    if(LOGGING_ENABLED){
+        printf("sent %u\n", end);
+    }
+
+    not_eof = !feof(filename);
+    //send first packet
+
+    while(not_eof){    
         /*
         check if we have recieved an ack
         if we have check it is the correct one and modify window size, ssh, etc as necessary
@@ -479,12 +495,12 @@ void serve_local_file3(int listen_sock, int send_sock, FILE* filename){
         */
         bytes_proc = recv(listen_sock, &ack, HEADER_SIZE, MSG_DONTWAIT);
         if(bytes_proc > 0){
-            diff = seqdiff(start, ack);
-            //if repeated ack
-            if(ack == CLOSE_PACKET_NUM){
-                return; 
-            }else if(diff == 0){
+            printf("recieved ack %u\n", ack);
+            if(ack == start){
                 last_ack_count++;
+                if(LOGGING_ENABLED){
+                    printf("duplicate ack %u\n", ack);
+                }
                 if(last_ack_count == DUP_ACK_LIMIT){
                     fast_retrans = true;
                     ssh = max(2, cwnd/2);
@@ -502,7 +518,7 @@ void serve_local_file3(int listen_sock, int send_sock, FILE* filename){
                     if(last_ack_count%DUP_ACK_LIMIT == 0){
                         //go back to the dropped packet
                         diff = seqdiff(start, end);
-                        if(fseek(filename, -TEXT_SIZE*diff, SEEK_CUR)){perror("bad fseek backwards");close(listen_sock);exit(1);}
+                        if(fseek(filename, -TEXT_SIZE*(diff+1), SEEK_CUR)){perror("bad fseek backwards");close(listen_sock);exit(1);}
                         
                         //build header
                         *header_ptr = start;
@@ -515,13 +531,18 @@ void serve_local_file3(int listen_sock, int send_sock, FILE* filename){
                         last_sent_time = time(NULL); 
 
                         //return to original place
-                        if(fseek(filename, TEXT_SIZE*(diff-1), SEEK_CUR)){perror("bad fseek forwards");close(listen_sock);exit(1);}
+                        if(fseek(filename, TEXT_SIZE*(diff), SEEK_CUR)){perror("bad fseek forwards");close(listen_sock);exit(1);}
                     }
                 }
                 
-            }else if(inrange(start, ack-1,cwnd)){
+            }else if(inrange(start, ack-1,cwnd)){ 
+                if(LOGGING_ENABLED){
+                    printf("ack %u\n", ack);
+                }
+                //NOTE: doesn't take advantage in the case of timeout and delayed ack
+                
                 //ack must be within start, (end+1), we will check if it is in range to determine if this is a late ack
-
+                diff = seqdiff(start, ack);
                 start = (start + diff) % RECIEVE_WINDOW_SIZE; 
                 //recover from fast retrans
                 if(fast_retrans){
@@ -531,12 +552,12 @@ void serve_local_file3(int listen_sock, int send_sock, FILE* filename){
                 if(cwnd <= ssh){
                     if(cwnd + diff > ssh){
                         cwnd = ssh;
-                        cwnd_frac = ssh - (cwnd +diff - ssh);
+                        cwnd_frac = (cwnd +diff - ssh) % cwnd;
                     }else{
                         cwnd = min(cwnd+diff, MAX_WINDOW_SIZE);
                     }
                     
-                }else{
+                }else{ //if cwnd > ssh
                     cwnd_frac = cwnd_frac + diff;
                     if(cwnd_frac > cwnd){
                         cwnd_frac = cwnd_frac%cwnd;
@@ -551,9 +572,12 @@ void serve_local_file3(int listen_sock, int send_sock, FILE* filename){
         check if we can send a packet and send a packet
         if we are at the end of the file, we seek to where the last read is
         */
-        if (end < ((start + cwnd) % RECIEVE_WINDOW_SIZE)){
+        if (inrange(start, end+1, cwnd)){
+            //printf("sending packet: start %u, end %u, cwnd:%u\n", start, end, cwnd);
+
             //read from file
-            end = (end+1) % RECIEVE_WINDOW_SIZE; 
+            printf("sending packet: start %u, end %u, cwnd:%u\n", start, end, cwnd);
+
             *header_ptr = end; 
             bytes_proc = fread(body_ptr, 1, TEXT_SIZE, filename);
             if(ferror(filename)){perror("bad read");close(listen_sock);exit(1);}
@@ -563,25 +587,102 @@ void serve_local_file3(int listen_sock, int send_sock, FILE* filename){
             if(bytes_proc == -1){perror("bad resend");close(listen_sock);exit(1);}
             last_sent_time = time(NULL); 
             
+            if(LOGGING_ENABLED){
+                printf("sent %u\n", end);
+            }
+            
             //if we have read to the end of the file
             if(feof(filename)){
-                if(fseek(filename, -(bytes_proc - HEADER_SIZE), SEEK_CUR)){perror("bad fseek to end");close(listen_sock);exit(1);} 
                 break;
             }
         }
-
-
         /*
             if timeout
         */
         if(difftime(last_sent_time, time(NULL)) > TIMEOUT){
             ssh = max(cwnd/2, START_SSTHRESH); //TODO: should this be start ssthresh or 2
             cwnd = 1;
-            //fseek(filename, ,SEEK_CUR)
+            diff = seqdiff(start,end);
+            if (fseek(filename, -TEXT_SIZE*(diff+1),SEEK_CUR)){perror("bad timeout fseek");exit(1);}
             end = start; 
+            if(LOGGING_ENABLED){
+                printf("time out, restart at %u\n",start);
+            }
         }
     }
 
+    /*
+        we have reached end of file, need to wait and see if there are any final issues
+    */
+    uint8_t final_start = start;
+    uint8_t final_end = end;
+    size_t last_size = bytes_proc - HEADER_SIZE;
+    bool recd_end = false;
+    long start_to_end = -1*(last_size + (TEXT_SIZE * seqdiff(final_start, final_end)));
 
+    char last_msg[2] = {(char)CLOSE_PACKET_NUM, final_end};
+
+    bytes_proc = send(send_sock, last_msg, 2, 0);
+    if(bytes_proc == -1){perror("bad first end send"); exit(1);}
+    
+    printf("%u, %u, %u, %u, %ld\n",final_start, final_end, seqdiff(final_start,final_end), last_size, start_to_end);
+    printf("%u, %u, %u\n", TEXT_SIZE, seqdiff(final_start,final_end),TEXT_SIZE * seqdiff(final_start, final_end));
+    if(fseek(filename, start_to_end, SEEK_END)){perror("bad first end seek"); exit(1);}
+
+    while(true){
+        bytes_proc = recv(listen_sock, &ack, HEADER_SIZE, MSG_DONTWAIT);
+        if(bytes_proc>0){
+            if(ack == CLOSE_PACKET_NUM){
+                recd_end = true;
+                continue;
+            }
+            
+            if(inrange(final_start, ack, cwnd)){
+                
+                //seek to correct pos
+                diff = seqdiff(final_start, ack);
+                if(fseek(filename, TEXT_SIZE * diff, SEEK_CUR)){perror("bad fseek in final"); exit(1);}
+
+                //build packet
+                *header_ptr = ack;
+                bytes_proc = fread(body_ptr, 1, TEXT_SIZE, filename);
+                if(ferror(filename)){perror("bad ending reread");exit(1);}
+                        
+                //resend
+                bytes_proc = send(send_sock, full_buffer, HEADER_SIZE+bytes_proc, 0);
+                if(bytes_proc == -1){perror("bad ending send");exit(1);}
+                last_sent_time = time(NULL); 
+
+                if(!recd_end){
+                    bytes_proc = send(send_sock, last_msg, 2, 0);
+                    if(bytes_proc == -1){perror("bad final end send"); exit(1);}
+                }
+
+                if(fseek(filename, start_to_end, SEEK_END)){perror("bad final end seek"); exit(1);}
+            
+            }
+
+            if(difftime(last_sent_time, time(NULL)) > TIMEOUT){
+
+                //seek to correct pos
+                diff = seqdiff(final_start, ack);
+                if(fseek(filename, TEXT_SIZE * diff, SEEK_CUR)){perror("bad fseek in final"); exit(1);}
+
+                //build packet
+                *header_ptr = ack;
+                bytes_proc = fread(body_ptr, 1, TEXT_SIZE, filename);
+                if(ferror(filename)){perror("bad ending reread");exit(1);}
+                        
+                //resend
+                bytes_proc = send(send_sock, full_buffer, HEADER_SIZE+bytes_proc, 0);
+                if(bytes_proc == -1){perror("bad ending send");exit(1);}
+                last_sent_time = time(NULL); 
+
+                if(fseek(filename, start_to_end, SEEK_END)){perror("bad timeout end seek"); exit(1);}
+
+            }
+        }
+
+    }
 }
 

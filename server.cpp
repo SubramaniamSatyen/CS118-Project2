@@ -57,8 +57,8 @@ int main() {
     FILE *fp = fopen("output.txt", "wb");
 
     // TODO: Receive file from the client and save it as output.txt
-    rec_file(listen_sockfd,  send_sockfd, fp, client_addr_to, server_addr);
-    // rec_file2(listen_sockfd,  send_sockfd, fp);
+    //rec_file(listen_sockfd,  send_sockfd, fp, client_addr_to, server_addr);
+    rec_file2(listen_sockfd,  send_sockfd, fp);
 
     fclose(fp);
     close(listen_sockfd);
@@ -174,7 +174,7 @@ void rec_file(int listen_sock, int send_sock, FILE* filename, sockaddr_in send_a
 
             bytes_written = fwrite(stored_records[seq_num_to_write].packet, 1, stored_records[seq_num_to_write].length, filename);
             if (LOGGING_ENABLED) { 
-                printf("SERVER LOGGING: WRITE | writing %u bytes from seq #: %u \n", bytes_written, seq_num_to_write);
+                printf("SERVER LOGGING: WRITE | writing %u bytes from seq #: %lu \n", bytes_written, seq_num_to_write);
             }
 
             // TODO: Handle case of bytes_written = 0 or not equal length...
@@ -211,21 +211,32 @@ void rec_file2(int listen_sock, int send_sock, FILE* filename){
     //for writing into file, sending ack
     unsigned char next_packet = 0; //start at 0, next packet expected
     unsigned char* next_packet_addr= &next_packet; 
-
+    
+    uint8_t final_end = -1; //stores the final packet to be recieved, upon recieving will know to exit 
     
     while(true){
         //find next avilable index in storage to read message into
         while(occupied_storage[storage_index]){
             storage_index = (storage_index+1)%STORAGE_SIZE;
         }
-
+        
         //read in file to storage
         bytes_processed = recv(listen_sock, storage[storage_index], MAX_PACKET_SIZE, 0);
         if(bytes_processed == -1){perror("bad read");close(listen_sock);exit(1); }
 
         //connect new storage to record if it is a new message
         in_packet_number = storage[storage_index][0];                                           //msg is 1 byte header of seq number
-        if(stored_records[in_packet_number].msg_pointer == nullptr){                            // if have not recieved packet, build record
+        if(in_packet_number == CLOSE_PACKET_NUM){                                               //if we get end packet signal
+            final_end = storage[storage_index][1];
+            bytes_processed = send(send_sock, &final_end, HEADER_SIZE, 0);
+            if(bytes_processed == -1){perror("bad send close packet");exit(1); }
+
+            continue;
+        }else if(!inrange(next_packet, in_packet_number, MAX_WINDOW_SIZE)){ // if delayed duplicate
+            bytes_processed = send(send_sock, next_packet_addr, HEADER_SIZE, 0);
+            if(bytes_processed == -1){perror("bad ack");exit(1); }
+
+        }else if(stored_records[in_packet_number].msg_pointer == nullptr){                            // if have not recieved packet, build record
             occupied_storage[storage_index] = true;
             stored_records[in_packet_number].msg_pointer = storage[storage_index] + HEADER_SIZE; 
             stored_records[in_packet_number].index = storage_index;
@@ -235,6 +246,8 @@ void rec_file2(int listen_sock, int send_sock, FILE* filename){
             }                 
 
         }//no need for else, will correctly run next sections
+
+        
 
         //read to file (if correct)
         while(stored_records[next_packet].msg_pointer != nullptr){
@@ -246,17 +259,24 @@ void rec_file2(int listen_sock, int send_sock, FILE* filename){
             //mark everything as empty
             occupied_storage[storage_index] = false;
             stored_records[next_packet].msg_pointer = nullptr;
-
             //go to next packet
             next_packet = (next_packet+1)%RECIEVE_WINDOW_SIZE; 
+            printf("next_packet : %u\n", next_packet);
+            if(LOGGING_ENABLED){
+                printf("read up to %u\n", next_packet);
+            }
         }
 
         //send ack message for next expected packet
         bytes_processed = send(send_sock, next_packet_addr, HEADER_SIZE, 0);
         if(LOGGING_ENABLED){
-            printf("sent ack %u\n", next_packet_addr);
+            printf("sent ack %u\n", *next_packet_addr);
         }
-        if(bytes_processed == -1){perror("bad ack");close(listen_sock);exit(1); }
+        if(bytes_processed == -1){perror("bad ack");exit(1); }
+        
+        //if we have read everything, return
+            //if final end is set to a valid seq number and nextpacket-- is final_end, we are done
+        if(isEnd(next_packet, final_end)){return;}
     }
 }
 
