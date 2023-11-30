@@ -4,7 +4,9 @@
 #include <string.h>
 #include <unistd.h>
 #include <set> 
-
+#include <ctime>
+#include <poll.h>
+#include <algorithm>
 #include "utils.h"
 
 #define STORAGE_SIZE 300
@@ -75,6 +77,14 @@ void rec_file(int listen_sock, int send_sock, FILE* filename, sockaddr_in send_a
 
     record stored_records[RECIEVE_WINDOW_SIZE] = {nullptr, 0}; //struct stores pointer in storage and the length of the read in file
     int next_free_buffer = 0, bytes_read = 0, bytes_written = 0, bytes_acked = 0;
+
+    // Polling variables
+    struct pollfd fds[1];
+    fds[0].fd = listen_sock;
+    fds[0].events = POLLIN;
+    time_t close_start;
+
+
     while (true){
         // Read next message 
         bytes_read = recvfrom(listen_sock, storage[next_free_buffer], MAX_PACKET_SIZE, 0, (struct sockaddr*)&rec_addr, &sock_addr_len);
@@ -87,12 +97,35 @@ void rec_file(int listen_sock, int send_sock, FILE* filename, sockaddr_in send_a
             }
 
             if (curr_seq_num == CLOSE_PACKET_NUM) {
+                // Send initial ACK
                 unsigned char ack_num = CLOSE_PACKET_NUM;
                 bytes_acked = sendto(send_sock, &ack_num, 1, 0, (struct sockaddr*)&send_addr, sizeof(send_addr));
                 if (LOGGING_ENABLED) { 
                     printf("SERVER LOGGING: CLOSE ACK | sent closing ack #: %u, read %u bytes\n", ack_num, bytes_acked);
                 }
-                break;
+                close_start = time(nullptr);
+                // Closing state
+                while (true){
+                    // If haven't heard back from client in a couple timeouts, close server
+                    if (difftime(TIMEOUT * CLOSE_MULTI + close_start, time(nullptr)) < 0){
+                        if (LOGGING_ENABLED) { 
+                            printf("SERVER LOGGING: CLOSE CON | \n");
+                        }
+                        return;
+
+                    // Poll for client retransmit of close request (meaning didn't get ACK) and resend ACK
+                    } else {
+                        int listen_results = poll(fds, 1, 10);
+                        if (listen_results > 0 && fds[0].revents & POLLIN){
+                            bytes_read = recvfrom(listen_sock, storage[next_free_buffer], MAX_PACKET_SIZE, 0, (struct sockaddr*)&rec_addr, &sock_addr_len);
+                            curr_seq_num = *(storage[next_free_buffer]);
+                            if (curr_seq_num == CLOSE_PACKET_NUM) {
+                                bytes_acked = sendto(send_sock, &ack_num, 1, 0, (struct sockaddr*)&send_addr, sizeof(send_addr));
+                                close_start = time(nullptr);
+                            }
+                        }
+                    }
+                }
             }
             // If packet not able to fit in receiver window, then don't buffer it (ex: duplicate of already written packet)
             bool bufferable_seq_num = false;
@@ -108,11 +141,11 @@ void rec_file(int listen_sock, int send_sock, FILE* filename, sockaddr_in send_a
                 next_free_buffer = (next_free_buffer + 1) % STORAGE_SIZE;
             }
             // If received duplicate packet in window update packet info
-            else if (stored_records[curr_seq_num].packet != nullptr && bufferable_seq_num){
-                printf("SERVER LOGGING: DUPLICATE PACKET | replacing buffered %u bytes from seq #: %u \n", bytes_read, curr_seq_num);
-                memcpy(stored_records[curr_seq_num].packet, storage[next_free_buffer] + HEADER_SIZE, bytes_read - HEADER_SIZE);
-                stored_records[curr_seq_num].length = bytes_read - HEADER_SIZE;
-            }
+            // else if (stored_records[curr_seq_num].packet != nullptr && bufferable_seq_num){
+            //     printf("SERVER LOGGING: DUPLICATE PACKET | replacing buffered %u bytes from seq #: %u \n", bytes_read, curr_seq_num);
+            //     memcpy(stored_records[curr_seq_num].packet, storage[next_free_buffer] + HEADER_SIZE, bytes_read - HEADER_SIZE);
+            //     stored_records[curr_seq_num].length = bytes_read - HEADER_SIZE;
+            // }
         }
 
         // Write out any buffers that can be written to file (in order from next expected)
