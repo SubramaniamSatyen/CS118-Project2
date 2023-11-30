@@ -120,7 +120,7 @@ void serve_local_file(int listen_sock, int send_sock, FILE* file, sockaddr_in se
     time_t timeout_start;
     unsigned int cwnd = 1, cwnd_frac = 0, ssh = START_SSTHRESH, dup_ack_count = 0;
 
-    time_t logging_time;
+    struct timeval tval_logging;
 
     while (true){
         if (sent_seq_num < curr_window_start + cwnd){
@@ -128,9 +128,10 @@ void serve_local_file(int listen_sock, int send_sock, FILE* file, sockaddr_in se
             // If reached end of file, no transmission
             if (bytes_read > 0){
                 // Set sequence number and send packet
-                if (LOGGING_ENABLED) { 
-                    printf("%ld | CLIENT: SEND NEW PACKET  | Sending seq #: %u, %u bytes\n", time(NULL), sent_seq_num, (bytes_read + HEADER_SIZE));
-                    printf("%ld | CLIENT: WINDOW INFO      | window size is %u, starting at %u\n", time(NULL), cwnd, curr_window_start);
+                if (LOGGING_ENABLED) {
+                    gettimeofday(&tval_logging, NULL);
+                    printf("%ld.%06ld | CLIENT: SEND NEW PACKET  | Sending seq #: %u, %u bytes\n", tval_logging.tv_sec, tval_logging.tv_usec, sent_seq_num, (bytes_read + HEADER_SIZE));
+                    printf("%ld.%06ld | CLIENT: WINDOW INFO      | window size is %u, starting at %u\n", tval_logging.tv_sec, tval_logging.tv_usec, cwnd, curr_window_start);
                 }
                 *seq_pointer = sent_seq_num % max_window;
                 sendto(send_sock, send_buffer, bytes_read + HEADER_SIZE, 0, (struct sockaddr*)&send_addr, sizeof(send_addr));
@@ -148,7 +149,8 @@ void serve_local_file(int listen_sock, int send_sock, FILE* file, sockaddr_in se
                 // If the ACK message isn't requesting the start of the window, then we can move window forward
                 if (*rec_buffer != (curr_window_start % max_window)){
                     if (LOGGING_ENABLED) { 
-                        printf("%ld | CLIENT: ACKED PACKET     | received ack for seq #: %u, %u bytes\n", time(NULL), *rec_buffer, ack_bytes_read);
+                        gettimeofday(&tval_logging, NULL);
+                        printf("%ld.%06ld | CLIENT: ACKED PACKET     | received ack for seq #: %u, %u bytes\n", tval_logging.tv_sec, tval_logging.tv_usec, *rec_buffer, ack_bytes_read);
                     }
                     for (unsigned long i = curr_window_start; i <= curr_window_start + MAX_WINDOW_SIZE; i++){
                         if (i % max_window == *rec_buffer){
@@ -159,14 +161,16 @@ void serve_local_file(int listen_sock, int send_sock, FILE* file, sockaddr_in se
                             if (dup_ack_count >= DUP_ACK_LIMIT){
                                 cwnd = ssh;
                                 if (LOGGING_ENABLED) { 
-                                    printf("%ld | CLIENT: FAST RETRANSMIT  | Updating window size to %u, starting at %u\n", time(NULL), cwnd, curr_window_start);
+                                    gettimeofday(&tval_logging, NULL);
+                                    printf("%ld.%06ld | CLIENT: FAST RETRANSMIT  | Updating window size to %u, starting at %u\n", tval_logging.tv_sec, tval_logging.tv_usec, cwnd, curr_window_start);
                                 }
                             }
                             // Update window size if in slow start
                             else if (cwnd <= ssh && cwnd < MAX_WINDOW_SIZE){
                                 cwnd += packet_diff;
                                 if (LOGGING_ENABLED) { 
-                                    printf("%ld | CLIENT: SLOW START       | Updating window size to %u, starting at %u\n", time(NULL), cwnd, curr_window_start);
+                                    gettimeofday(&tval_logging, NULL);
+                                    printf("%ld.%06ld | CLIENT: SLOW START       | Updating window size to %u, starting at %u\n", tval_logging.tv_sec, tval_logging.tv_usec, cwnd, curr_window_start);
                                 }
                             }
                             // Update window size if in congestion avoidance
@@ -177,7 +181,8 @@ void serve_local_file(int listen_sock, int send_sock, FILE* file, sockaddr_in se
                                     cwnd++; 
                                 }
                                 if (LOGGING_ENABLED) { 
-                                    printf("%ld | CLIENT: CONGESTION AVOID | Updating window size to %u, starting at %u\n", time(NULL), cwnd, curr_window_start);
+                                    gettimeofday(&tval_logging, NULL);
+                                    printf("%ld.%06ld | CLIENT: CONGESTION AVOID | Updating window size to %u, starting at %u\n", tval_logging.tv_sec, tval_logging.tv_usec, cwnd, curr_window_start);
                                 }
                             }
                             dup_ack_count = 0;
@@ -188,7 +193,8 @@ void serve_local_file(int listen_sock, int send_sock, FILE* file, sockaddr_in se
                 else {
                     dup_ack_count += 1;
                     if (LOGGING_ENABLED) {
-                        printf("%ld | CLIENT: DUPLICATE ACK    | received ack for seq #: %u, %u bytes\n", time(NULL), *rec_buffer, ack_bytes_read);
+                        gettimeofday(&tval_logging, NULL);
+                        printf("%ld.%06ld | CLIENT: DUPLICATE ACK    | received ack for seq #: %u, %u bytes\n", tval_logging.tv_sec, tval_logging.tv_usec, *rec_buffer, ack_bytes_read);
                     }
                     // Entering fast retransmit 
                     if (dup_ack_count == DUP_ACK_LIMIT){
@@ -201,7 +207,8 @@ void serve_local_file(int listen_sock, int send_sock, FILE* file, sockaddr_in se
 
                         // Set sequence number and send packet
                         if (LOGGING_ENABLED) {
-                            printf("%ld | CLIENT: FAST RETRANSMIT  | Resending seq #: %u, %u bytes\n", time(NULL), curr_window_start, (bytes_read + HEADER_SIZE));
+                            gettimeofday(&tval_logging, NULL);
+                            printf("%ld.%06ld | CLIENT: FAST RETRANSMIT  | Resending seq #: %u, %u bytes\n", tval_logging.tv_sec, tval_logging.tv_usec, curr_window_start, (bytes_read + HEADER_SIZE));
                         }
                         *seq_pointer = curr_window_start % max_window;
                         sendto(send_sock, send_buffer, bytes_read + HEADER_SIZE, 0, (struct sockaddr*)&send_addr, sizeof(send_addr));
@@ -211,14 +218,16 @@ void serve_local_file(int listen_sock, int send_sock, FILE* file, sockaddr_in se
                         ssh = max(cwnd / 2, (unsigned int)2);
                         cwnd += ssh + 3;
                         if (LOGGING_ENABLED) {
-                            printf("%ld | CLIENT: FAST RETRANSMIT  | Updating window size to %u, starting at %u\n", time(NULL), cwnd, curr_window_start);
+                            gettimeofday(&tval_logging, NULL);
+                            printf("%ld.%06ld | CLIENT: FAST RETRANSMIT  | Updating window size to %u, starting at %u\n", tval_logging.tv_sec, tval_logging.tv_usec, cwnd, curr_window_start);
                         }
                     }
                     // Fast recovery for duplicate ack
                     else if (dup_ack_count > DUP_ACK_LIMIT){
                         cwnd += 1;
                         if (LOGGING_ENABLED) {
-                            printf("%ld | CLIENT: FAST RECOVERY    | Updating window size to %u, starting at %u\n", time(NULL), cwnd, curr_window_start);
+                            gettimeofday(&tval_logging, NULL);
+                            printf("%ld.%06ld | CLIENT: FAST RECOVERY    | Updating window size to %u, starting at %u\n", tval_logging.tv_sec, tval_logging.tv_usec, cwnd, curr_window_start);
                         }
                     }
                 }
@@ -240,7 +249,8 @@ void serve_local_file(int listen_sock, int send_sock, FILE* file, sockaddr_in se
 
             // Set sequence number and send packet
             if (LOGGING_ENABLED) {
-                printf("%ld | CLIENT: PACKET TIMEOUT   | Resending seq #: %u, %u bytes \n", time(NULL), curr_window_start, (bytes_read + HEADER_SIZE));
+                gettimeofday(&tval_logging, NULL);
+                printf("%ld.%06ld | CLIENT: PACKET TIMEOUT   | Resending seq #: %u, %u bytes \n", tval_logging.tv_sec, tval_logging.tv_usec, curr_window_start, (bytes_read + HEADER_SIZE));
             }
             *seq_pointer = curr_window_start % max_window;
             sendto(send_sock, send_buffer, bytes_read + HEADER_SIZE, 0, (struct sockaddr*)&send_addr, sizeof(send_addr));
@@ -250,7 +260,8 @@ void serve_local_file(int listen_sock, int send_sock, FILE* file, sockaddr_in se
             ssh = max(cwnd / 2, (unsigned int)2);
             cwnd = 1;
             if (LOGGING_ENABLED){
-                printf("%ld | CLIENT: WINDOW INFO      | Upating window size to %u, starting at %u \n", time(NULL), cwnd, curr_window_start);
+                gettimeofday(&tval_logging, NULL);
+                printf("%ld.%06ld | CLIENT: WINDOW INFO      | Upating window size to %u, starting at %u \n", tval_logging.tv_sec, tval_logging.tv_usec, cwnd, curr_window_start);
             }
         }
 
@@ -265,10 +276,10 @@ void serve_local_file(int listen_sock, int send_sock, FILE* file, sockaddr_in se
     *seq_pointer = CLOSE_PACKET_NUM;
 
     if (LOGGING_ENABLED) {
-        printf("%ld | CLIENT: CLOSING REQ      | Requesting closing #: %u, %u bytes \n", time(NULL), *seq_pointer, 1);
+        gettimeofday(&tval_logging, NULL);
+        printf("%ld.%06ld | CLIENT: CLOSING REQ      | Requesting closing #: %u, %u bytes \n", tval_logging.tv_sec, tval_logging.tv_usec, *seq_pointer, 1);
     }
     sendto(send_sock, send_buffer, 1, 0, (struct sockaddr*)&send_addr, sizeof(send_addr));
-    attempts += 1;
     timeout_start = time(nullptr);
     while (true) {
         // Resend closing message
@@ -276,11 +287,8 @@ void serve_local_file(int listen_sock, int send_sock, FILE* file, sockaddr_in se
             sendto(send_sock, send_buffer, HEADER_SIZE, 0, (struct sockaddr*)&send_addr, sizeof(send_addr));
             timeout_start = time(nullptr);
             if (LOGGING_ENABLED) {
-                printf("%ld | CLIENT: CLOSING REQ      | Requesting closing #: %u, %u bytes \n", time(NULL), *seq_pointer, 1);
-            }
-            attempts += 1;
-            if (attempts > 5){
-                break;
+                gettimeofday(&tval_logging, NULL);
+                printf("%ld.%06ld | CLIENT: CLOSING REQ      | Requesting closing #: %u, %u bytes \n", tval_logging.tv_sec, tval_logging.tv_usec, *seq_pointer, 1);
             }
         }
         
@@ -292,8 +300,8 @@ void serve_local_file(int listen_sock, int send_sock, FILE* file, sockaddr_in se
             if (ack_bytes_read > 0 && read_error != EWOULDBLOCK){
                 if (*rec_buffer == CLOSE_PACKET_NUM){
                     if (LOGGING_ENABLED) { 
-                        char curr_seq_num = *rec_buffer;
-                        printf("%ld | CLIENT: TERMINATING ACK  | closing connection", time(NULL));
+                        gettimeofday(&tval_logging, NULL);
+                        printf("%ld.%06ld | CLIENT: TERMINATING ACK  | closing connection", tval_logging.tv_sec, tval_logging.tv_usec);
                         
                     }
                     break;
