@@ -23,7 +23,6 @@ using namespace std;
 void serve_local_file(int listen_sock, int send_sock, FILE* file, sockaddr_in send_addr, sockaddr_in rec_addr);
 void serve_local_file2(int listen_sock, int send_sock, FILE* filename);
 void serve_local_file3(int listen_sock, int send_sock, FILE* filename);
-uint8_t seqdiff(uint8_t start, uint8_t end);
 
 int main(int argc, char *argv[]) {
     int listen_sockfd, send_sockfd;
@@ -407,11 +406,12 @@ void serve_local_file2(int listen_sock, int send_sock, FILE* filename){
 
 void serve_local_file3(int listen_sock, int send_sock, FILE* filename){
     uint8_t start = 0, end = -1, cwnd = 1, cwnd_frac = 0, ssh = START_SSTHRESH;
-    /*start, end : [0-199] current bytes, (end - start < MAX_WINDOW_SIZE) or ((RECIEVE_WINDOW_SIZE - start) + end < MAX_WINDOW_SIZE)
+    /*start, end : [0-199] current bytes, 
+        (end - start + 1 <= MAX_WINDOW_SIZE) or ((RECIEVE_WINDOW_SIZE - start) + end + 1 <= MAX_WINDOW_SIZE)
         start : last unacked packet
         end : last sent packet (start at -1 to indicate )
     */
-    //cwnd : [0,100] current window size, this should always be <= 100 
+    //cwnd : [2,100] current window size, this should always be <= 100 
     //ssh : ssthresh
     
     time_t last_sent_time = time(NULL);
@@ -421,10 +421,8 @@ void serve_local_file3(int listen_sock, int send_sock, FILE* filename){
     char full_buffer[MAX_PACKET_SIZE];
     char *header_ptr = full_buffer; 
     char *body_ptr = full_buffer + HEADER_SIZE;
-    size_t message_size;
     //full buffer : the full message: 1B header with sequence number and 1199B body, also reused for acks
     //sequence number, message_start : pointers to where they start in our file
-    //size_t for size of message read from file, to be sent on send_sock
     
     uint8_t ack;
     uint last_ack_count;
@@ -441,6 +439,8 @@ void serve_local_file3(int listen_sock, int send_sock, FILE* filename){
     //helpers
     uint8_t diff; 
     size_t bytes_proc;
+    
+    /*
     unsigned long int filesize;
 
     //get filesize and return to beginning
@@ -452,19 +452,21 @@ void serve_local_file3(int listen_sock, int send_sock, FILE* filename){
 
     fseek(filename, 0, SEEK_SET);
     if(ferror(filename)){perror("bad seek to begin");exit(1);}
+    */
 
-
-    while(true){
-        
+    while(true){    
         /*
         check if we have recieved an ack
         if we have check it is the correct one and modify window size, ssh, etc as necessary
             timeout will be done later down
         */
-        message_size = recv(listen_sock, &ack, HEADER_SIZE, MSG_DONTWAIT);
-        if(message_size > 0){
+        bytes_proc = recv(listen_sock, &ack, HEADER_SIZE, MSG_DONTWAIT);
+        if(bytes_proc > 0){
+            diff = seqdiff(start, ack);
             //if repeated ack
-            if(ack == start){
+            if(ack == CLOSE_PACKET_NUM){
+                return; 
+            }else if(diff == 0){
                 last_ack_count++;
                 if(last_ack_count == DUP_ACK_LIMIT){
                     fast_retrans = true;
@@ -497,14 +499,11 @@ void serve_local_file3(int listen_sock, int send_sock, FILE* filename){
 
                         //return to original place
                         if(fseek(filename, TEXT_SIZE*(diff-1), SEEK_CUR)){perror("bad fseek forwards");close(listen_sock);exit(1);}
-
                     }
-
-
                 }
                 
-            }else{
-                diff = seqdiff(start, ack) - 1;
+            }else if(inrange(start, ack-1,cwnd)){
+                //ack must be within start, (end+1), we will check if it is in range to determine if this is a late ack
 
                 start = (start + diff) % RECIEVE_WINDOW_SIZE; 
                 //recover from fast retrans
@@ -533,6 +532,7 @@ void serve_local_file3(int listen_sock, int send_sock, FILE* filename){
 
         /*
         check if we can send a packet and send a packet
+        if we are at the end of the file, we seek to where the last read is
         */
         if (end < ((start + cwnd) % RECIEVE_WINDOW_SIZE)){
             //read from file
@@ -545,6 +545,12 @@ void serve_local_file3(int listen_sock, int send_sock, FILE* filename){
             bytes_proc = send(send_sock, full_buffer, HEADER_SIZE+bytes_proc, 0);
             if(bytes_proc == -1){perror("bad resend");close(listen_sock);exit(1);}
             last_sent_time = time(NULL); 
+            
+            //if we have read to the end of the file
+            if(feof(filename)){
+                if(fseek(filename, -(bytes_proc - HEADER_SIZE), SEEK_CUR)){perror("bad fseek to end");close(listen_sock);exit(1);} 
+                break;
+            }
         }
 
 
@@ -552,22 +558,13 @@ void serve_local_file3(int listen_sock, int send_sock, FILE* filename){
             if timeout
         */
         if(difftime(last_sent_time, time(NULL)) > TIMEOUT){
-            ssh = max(cwnd/2, START_SSTHRESH); //TODO: should this be start ssthres or 2
+            ssh = max(cwnd/2, START_SSTHRESH); //TODO: should this be start ssthresh or 2
             cwnd = 1;
             //fseek(filename, ,SEEK_CUR)
             end = start; 
-
         }
     }
 
 
 }
 
-//returns the number of packets between end and start
-uint8_t seqdiff(uint8_t start, uint8_t end){
-    if(start < end){
-        return end - start + 1;
-    }else{
-        return (RECIEVE_WINDOW_SIZE - end) + start + 1;
-    }
-}
