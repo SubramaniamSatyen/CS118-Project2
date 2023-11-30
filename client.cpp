@@ -116,8 +116,10 @@ void serve_local_file(int listen_sock, int send_sock, FILE* file, sockaddr_in se
     unsigned int max_window = RECIEVE_WINDOW_SIZE;
     unsigned long sent_seq_num = 1;
     unsigned long curr_window_start = sent_seq_num;
-    time_t timeout_start;
     unsigned long cwnd = 1, cwnd_frac = 0, ssh = START_SSTHRESH, dup_ack_count = 0;
+    struct timeval timeout_start, curr, add, cmp;
+    add.tv_sec = (int)TIMEOUT;
+    add.tv_usec = TIMEOUT - (int)TIMEOUT;
 
     struct timeval tval_logging;
 
@@ -135,7 +137,7 @@ void serve_local_file(int listen_sock, int send_sock, FILE* file, sockaddr_in se
                 *seq_pointer = sent_seq_num % max_window;
                 sendto(send_sock, send_buffer, bytes_read + HEADER_SIZE, 0, (struct sockaddr*)&send_addr, sizeof(send_addr));
                 sent_seq_num += 1;
-                timeout_start = time(nullptr);
+                gettimeofday(&timeout_start, NULL);
             }
         } 
         
@@ -211,7 +213,7 @@ void serve_local_file(int listen_sock, int send_sock, FILE* file, sockaddr_in se
                         }
                         *seq_pointer = curr_window_start % max_window;
                         sendto(send_sock, send_buffer, bytes_read + HEADER_SIZE, 0, (struct sockaddr*)&send_addr, sizeof(send_addr));
-                        timeout_start = time(nullptr);
+                        gettimeofday(&timeout_start, NULL);
 
                         // Updating window size
                         ssh = max(cwnd / 2, (unsigned long)2);
@@ -236,8 +238,10 @@ void serve_local_file(int listen_sock, int send_sock, FILE* file, sockaddr_in se
             }
         }
 
+        gettimeofday(&curr, NULL);
+        timeradd(&timeout_start, &add, &cmp);
         // Handle timeouts
-        if (difftime(TIMEOUT + timeout_start, time(nullptr)) < 0) {
+        if (timercmp(&cmp, &curr, <)) {
             // Storing current position
             long int current_position = ftell(file);
 
@@ -254,7 +258,7 @@ void serve_local_file(int listen_sock, int send_sock, FILE* file, sockaddr_in se
             }
             *seq_pointer = curr_window_start % max_window;
             sendto(send_sock, send_buffer, bytes_read + HEADER_SIZE, 0, (struct sockaddr*)&send_addr, sizeof(send_addr));
-            timeout_start = time(nullptr);
+            gettimeofday(&timeout_start, NULL);
 
             // Update window size for timeout
             ssh = max(cwnd / 2, (unsigned long)2);
@@ -279,12 +283,17 @@ void serve_local_file(int listen_sock, int send_sock, FILE* file, sockaddr_in se
         printf("%ld.%06ld | CLIENT: CLOSING REQ      | Requesting closing #: %u, %u bytes \n", tval_logging.tv_sec, tval_logging.tv_usec, *seq_pointer, 1);
     }
     sendto(send_sock, send_buffer, 1, 0, (struct sockaddr*)&send_addr, sizeof(send_addr));
-    timeout_start = time(nullptr);
+    gettimeofday(&timeout_start, NULL);
     while (true) {
+        gettimeofday(&tval_logging, NULL);
+        // printf("%ld.%06ld | Curr: %ld, Start: %ld, diff: %f, if: %d\n", tval_logging.tv_sec, tval_logging.tv_usec, time(nullptr), timeout_start, difftime(time(nullptr), timeout_start), (difftime(time(nullptr), timeout_start) > TIMEOUT));
         // Resend closing message
-        if (difftime(TIMEOUT + timeout_start, time(nullptr)) < 0){
+        gettimeofday(&curr, NULL);
+        timeradd(&timeout_start, &add, &cmp);
+        // Handle timeouts
+        if (timercmp(&cmp, &curr, <)) {
             sendto(send_sock, send_buffer, HEADER_SIZE, 0, (struct sockaddr*)&send_addr, sizeof(send_addr));
-            timeout_start = time(nullptr);
+            gettimeofday(&timeout_start, NULL);
             if (LOGGING_ENABLED) {
                 gettimeofday(&tval_logging, NULL);
                 printf("%ld.%06ld | CLIENT: CLOSING REQ      | Requesting closing #: %u, %u bytes \n", tval_logging.tv_sec, tval_logging.tv_usec, *seq_pointer, 1);

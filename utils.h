@@ -13,7 +13,7 @@
 #define CLIENT_PORT_TO 5001
 #define PAYLOAD_SIZE 1024
 #define WINDOW_SIZE 20
-#define TIMEOUT 1               // Determine this from fixed prop delay of 1 ms
+#define TIMEOUT 0.3               // Determine this from fixed prop delay of 1 ms
 #define MAX_SEQUENCE 1024
 
 //Our macros

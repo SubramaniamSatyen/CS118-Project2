@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <set> 
 #include <ctime>
+#include <sys/time.h>
 #include <poll.h>
 #include <algorithm>
 #include "utils.h"
@@ -82,8 +83,11 @@ void rec_file(int listen_sock, int send_sock, FILE* filename, sockaddr_in send_a
     struct pollfd fds[1];
     fds[0].fd = listen_sock;
     fds[0].events = POLLIN;
-    time_t close_start;
 
+    struct timeval tval_logging;
+    struct timeval timeout_start, curr, add, cmp;
+    add.tv_sec = (int)(TIMEOUT * CLOSE_MULTI);
+    add.tv_usec = (TIMEOUT * CLOSE_MULTI) - (int)(TIMEOUT * CLOSE_MULTI);
 
     while (true){
         // Read next message 
@@ -101,15 +105,20 @@ void rec_file(int listen_sock, int send_sock, FILE* filename, sockaddr_in send_a
                 unsigned char ack_num = CLOSE_PACKET_NUM;
                 bytes_acked = sendto(send_sock, &ack_num, 1, 0, (struct sockaddr*)&send_addr, sizeof(send_addr));
                 if (LOGGING_ENABLED) { 
-                    printf("SERVER LOGGING: CLOSE ACK | sent closing ack #: %u, read %u bytes\n", ack_num, bytes_acked);
+                    gettimeofday(&tval_logging, NULL);
+                    printf("%ld.%06ld | SERVER LOGGING: CLOSE ACK | sent closing ack #: %u, read %u bytes\n", tval_logging.tv_sec, tval_logging.tv_usec, ack_num, bytes_acked);
                 }
-                close_start = time(nullptr);
+                gettimeofday(&timeout_start, NULL);
                 // Closing state
                 while (true){
                     // If haven't heard back from client in a couple timeouts, close server
-                    if (difftime(TIMEOUT * CLOSE_MULTI + close_start, time(nullptr)) < 0){
+                    gettimeofday(&curr, NULL);
+                    timeradd(&timeout_start, &add, &cmp);
+                    // Handle timeouts
+                    if (timercmp(&cmp, &curr, <)) {
                         if (LOGGING_ENABLED) { 
-                            printf("SERVER LOGGING: CLOSE CON | \n");
+                            gettimeofday(&tval_logging, NULL);
+                            printf("%ld.%06ld | SERVER LOGGING: CLOSE CON | \n", tval_logging.tv_sec, tval_logging.tv_usec);
                         }
                         return;
 
@@ -120,8 +129,12 @@ void rec_file(int listen_sock, int send_sock, FILE* filename, sockaddr_in send_a
                             bytes_read = recvfrom(listen_sock, storage[next_free_buffer], MAX_PACKET_SIZE, 0, (struct sockaddr*)&rec_addr, &sock_addr_len);
                             curr_seq_num = *(storage[next_free_buffer]);
                             if (curr_seq_num == CLOSE_PACKET_NUM) {
+                                if (LOGGING_ENABLED) { 
+                                    gettimeofday(&tval_logging, NULL);
+                                    printf("%ld.%06ld | SERVER LOGGING: CLOSE ACK | sent closing ack #: %u, read %u bytes\n", tval_logging.tv_sec, tval_logging.tv_usec, ack_num, bytes_acked);
+                                }
                                 bytes_acked = sendto(send_sock, &ack_num, 1, 0, (struct sockaddr*)&send_addr, sizeof(send_addr));
-                                close_start = time(nullptr);
+                                gettimeofday(&timeout_start, NULL);
                             }
                         }
                     }
