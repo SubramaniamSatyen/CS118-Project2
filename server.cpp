@@ -196,7 +196,7 @@ void rec_file2(int listen_sock, int send_sock, FILE* filename){
     unsigned char in_packet_number;    
 
     //for writing into file, sending ack
-    unsigned char next_packet = 0; //start at 0
+    unsigned char next_packet = 0; //start at 0, next packet expected
     unsigned char* next_packet_addr= &next_packet; 
 
     
@@ -216,7 +216,10 @@ void rec_file2(int listen_sock, int send_sock, FILE* filename){
             occupied_storage[storage_index] = true;
             stored_records[in_packet_number].msg_pointer = storage[storage_index] + HEADER_SIZE; 
             stored_records[in_packet_number].index = storage_index;
-            stored_records[in_packet_number].length = bytes_processed - HEADER_SIZE;                      
+            stored_records[in_packet_number].length = bytes_processed - HEADER_SIZE;     
+            if(LOGGING_ENABLED){
+                printf("recieved packet %u, length %u\n", in_packet_number, bytes_processed);
+            }                 
 
         }//no need for else, will correctly run next sections
 
@@ -237,6 +240,9 @@ void rec_file2(int listen_sock, int send_sock, FILE* filename){
 
         //send ack message for next expected packet
         bytes_processed = send(send_sock, next_packet_addr, HEADER_SIZE, 0);
+        if(LOGGING_ENABLED){
+            printf("sent ack %u\n", next_packet_addr);
+        }
         if(bytes_processed == -1){perror("bad ack");close(listen_sock);exit(1); }
     }
 }

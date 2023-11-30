@@ -63,4 +63,17 @@ void printSend(struct packet* pkt, int resend) {
         printf("SEND %d %d%s%s\n", pkt->seqnum, pkt->acknum, pkt->last ? " LAST": "", pkt->ack ? " ACK": "");
 }
 
+//returns the number of packets between end and start
+uint8_t seqdiff(uint8_t start, uint8_t end){
+    if (end < start){end += RECIEVE_WINDOW_SIZE;}
+    return end - start; 
+}
+
+bool inrange(uint8_t start, uint8_t index, uint8_t cwnd){
+    if (index < start){
+        index += RECIEVE_WINDOW_SIZE;
+    }
+    return cwnd > (index - start);
+}
+
 #endif
