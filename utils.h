@@ -12,21 +12,22 @@
 #define SERVER_PORT 6002
 #define CLIENT_PORT_TO 5001
 #define PAYLOAD_SIZE 1024
-#define WINDOW_SIZE 5
-#define TIMEOUT 5
+#define WINDOW_SIZE 20
+#define TIMEOUT 1               // Determine this from fixed prop delay of 1 ms
 #define MAX_SEQUENCE 1024
 
 //Our macros
 #define MAX_PACKET_SIZE 1200
 #define HEADER_SIZE 1
 #define TEXT_SIZE MAX_PACKET_SIZE-HEADER_SIZE
-#define START_SSTHRESH 4
+#define START_SSTHRESH 15
 #define DUP_ACK_LIMIT 3
 #define MAX_WINDOW_SIZE 100
 #define RECIEVE_WINDOW_SIZE 2*MAX_WINDOW_SIZE
 #define CLOSE_PACKET_NUM 255
+#define CLOSE_MULTI 5
 
-#define LOGGING_ENABLED true
+#define LOGGING_ENABLED false
 
 
 // Packet Layout
