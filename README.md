@@ -1,35 +1,41 @@
 # CS 118 Course Project 2 - Reliable Data Transfer and Congestion Control
 
-**WARNING**: This README is provided as supplementary documentation to assist with the setup and execution of the course project. It does not replace the official project specification. Please refer to the official project specification for detailed requirements and instructions. In the case of any discrepancies or ambiguities, the official project specification takes precedence.
+This repo contains our solution for Fall 2023 UCLA CS 118's Project 2. The following details are adapted from the project specification written by the TAs of the class.
 
-## Overview
+## Project Specification Details
 
-This project aims to familiarize students with the concepts of reliable data transfer, congestion control, and building client-server applications over UDP. Students will implement a client and server in C that can upload files from the client to the server over UDP while handling packet loss, implementing reliability, and congestion control.
+### Client (`client.c`)
 
-## Getting Started
+Implements the logic for:
 
-### Prerequisites
+- Segmenting the file into packets.
+- Sending packets to the server implementing the reliable data transfer protocol.
+- Handling acknowledgments from the server.
+- Implementing congestion control (as needed based on the test type).
+
+### Server (`server.c`)
+
+Implements the logic for:
+
+- Receiving packets from the client.
+- Sending acknowledgments back to the client.
+- Reassembling the packets into the original file.
+- Writing the reassembled file to the filesystem as `output.txt`.
+
+## Running Locally
+Running this project locally will require the following prerequisites
 
 - C compiler (gcc recommended)
 - Python 3.7.3 for running the `rdcc_proxy.py` link simulator
 
-### Compiling the Code
+To run the project locally, take the following steps
+1. Clone this repo and navigate to the local project directory
+2. Run `make build` to build the project executable files
+3. Run `python rdcc_proxy.py [options]` to start the link connection simulation
+4. Run `./server` in a new terminal to start the server
+5. Run `./client [filename]` in a new terminal to transmit a file named `filename`
 
-Use the provided `Makefile` for compiling the server and client applications:
-
-```sh
-make build
-```
-
-This will generate two executable files: `server` and `client`.
-
-To clean the build files, simply run:
-
-```sh
-make clean
-```
-
-### Running the Link Simulator
+### Link Simulator Options
 
 To simulate the link with packet loss and queuing, run the `rdcc_proxy.py` script:
 
@@ -57,53 +63,3 @@ python rdcc_proxy.py --test_type rd --loss_rate 0.1
 ```
 
 For testing purposes, you may want to adjust the parameters such as loss rate or token bucket rate. Ensure that both the client and server programs are working as expected under different network conditions.
-
-### Running the Client and Server
-
-First, run the server:
-
-```sh
-./server
-```
-
-Then, in a separate terminal, run the client providing the filename to upload:
-
-```sh
-./client <filename>
-```
-
-Replace `<filename>` with the path to the file you want to transfer.
-
-## Project Tasks
-
-### Client (`client.c`)
-
-Implement the (potential) logic for:
-
-- Segmenting the file into packets.
-- Sending packets to the server implementing the reliable data transfer protocol.
-- Handling acknowledgments from the server.
-- Implementing congestion control (as needed based on the test type).
-
-### Server (`server.c`)
-
-Implement the (potential) logic for:
-
-- Receiving packets from the client.
-- Sending acknowledgments back to the client.
-- Reassembling the packets into the original file.
-- Writing the reassembled file to the filesystem as `output.txt`.
-
-## Modifying the Code
-
-Students are allowed and encouraged to modify the provided skeleton code and `utils.h` to fit the needs of their implementation as long as the core objectives are met.
-
-## Submission
-
-Please compress your modified `server.c`, `client.c`, and `Makefile` into a zip file using the following command:
-
-```sh
-make zip
-```
-
-Submit it according to the course submission guidelines.
